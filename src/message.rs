@@ -42,6 +42,9 @@ pub enum Message {
     /// User clicked the "Cancel" button
     CancelClicked,
 
+    /// User clicked "Cancel" during flash operation
+    CancelFlash,
+
     // ========================================================================
     // Async Result Messages
     // ========================================================================
@@ -57,8 +60,8 @@ pub enum Message {
 
     /// Progress update from flash subscription
     ///
-    /// Contains progress as a float between 0.0 and 1.0
-    FlashProgressUpdate(f32),
+    /// Contains (progress 0.0-1.0, bytes_written, speed_mb_per_sec)
+    FlashProgressUpdate(f32, u64, f32),
 
     /// Status message from flash operation
     FlashStatusMessage(String),

@@ -93,6 +93,16 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
             Task::none()
         }
 
+        Message::CancelFlash => {
+            // Cancel ongoing flash operation
+            state.flashing_active = false;
+            state.flash_progress = None;
+            state.flash_bytes_written = 0;
+            state.flash_speed_mb_s = 0.0;
+            state.error_message = Some("Flash operation cancelled by user".to_string());
+            Task::none()
+        }
+
         // ====================================================================
         // Async Result Messages
         // ====================================================================
@@ -109,15 +119,18 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
             Task::none()
         }
 
-        Message::FlashProgressUpdate(progress) => {
+        Message::FlashProgressUpdate(progress, bytes, speed) => {
             // Update flash progress from subscription
             state.flash_progress = Some(progress);
+            state.flash_bytes_written = bytes;
+            state.flash_speed_mb_s = speed;
             Task::none()
         }
 
-        Message::FlashStatusMessage(message) => {
-            // Log status message (could be displayed in UI if desired)
-            println!("[STATUS] {}", message);
+        Message::FlashStatusMessage(_message) => {
+            // Log status message in debug builds
+            #[cfg(debug_assertions)]
+            println!("[STATUS] {}", _message);
             Task::none()
         }
 

@@ -13,6 +13,7 @@ iced_fonts = { version = "0.1", features = ["bootstrap"] }
 rfd = "0.15"
 sysinfo = "0.30"
 futures = "0.3"
+futures-timer = "3.0"
 sled = "0.34"
 dirs = "5.0"
 

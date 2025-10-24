@@ -93,7 +93,9 @@ impl FlashKraft {
                     target.device_path.clone().into(),
                 )
                 .map(|progress| match progress {
-                    FlashProgress::Progress(p) => Message::FlashProgressUpdate(p),
+                    FlashProgress::Progress(p, bytes, speed) => {
+                        Message::FlashProgressUpdate(p, bytes, speed)
+                    }
                     FlashProgress::Message(msg) => Message::FlashStatusMessage(msg),
                     FlashProgress::Completed => Message::FlashCompleted(Ok(())),
                     FlashProgress::Failed(err) => Message::FlashCompleted(Err(err)),

@@ -8,15 +8,23 @@ use iced::stream;
 use iced::Subscription;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+
+/// Debug logging macro that only prints in debug builds
+macro_rules! debug_log {
+    ($($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        eprintln!("[FLASH_DEBUG] {}", format!($($arg)*));
+    };
+}
 
 /// Progress event from the flash operation
 #[derive(Debug, Clone)]
 pub enum FlashProgress {
-    /// Progress percentage (0.0 to 1.0)
-    Progress(f32),
+    /// Progress with details (percentage, bytes_written, speed_mb_per_sec)
+    Progress(f32, u64, f32),
     /// Status message
     Message(String),
     /// Operation completed successfully
@@ -38,7 +46,7 @@ pub fn flash_progress(image_path: PathBuf, device_path: PathBuf) -> Subscription
         stream::channel(100, move |mut output| async move {
             // Run the flash operation and stream progress
             let result =
-                run_flash_operation(image_path.clone(), device_path.clone(), &mut output).await;
+                run_flash_operation(image_path.clone(), device_path.clone(), output.clone()).await;
 
             match result {
                 Ok(_) => {
@@ -59,7 +67,7 @@ pub fn flash_progress(image_path: PathBuf, device_path: PathBuf) -> Subscription
 async fn run_flash_operation(
     image_path: PathBuf,
     device_path: PathBuf,
-    output: &mut futures::channel::mpsc::Sender<FlashProgress>,
+    mut output: futures::channel::mpsc::Sender<FlashProgress>,
 ) -> Result<(), String> {
     let image_path_str = image_path
         .to_str()
@@ -108,7 +116,7 @@ echo "STATUS:Image size: $IMAGE_SIZE bytes"
 
 # Write the image using dd with progress
 echo "STATUS:Writing image to device..."
-dd if="$IMAGE" of="$DEVICE" bs=4M status=progress oflag=direct conv=fsync 2>&1
+dd if="$IMAGE" of="$DEVICE" bs=4M status=progress oflag=direct conv=fsync
 
 # Sync
 echo "STATUS:Syncing data to disk..."
@@ -149,44 +157,83 @@ echo "STATUS:Flash operation completed!"
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
 
-    let stdout_reader = BufReader::new(stdout);
-    let stderr_reader = BufReader::new(stderr);
+    // Use async_std or tokio to handle the streams
+    // Since we're in an async context, we need to spawn tasks properly
+    let (progress_tx, mut progress_rx) = futures::channel::mpsc::channel::<(f32, u64, f32)>(100);
+    let (status_tx, mut status_rx) = futures::channel::mpsc::channel::<String>(100);
 
-    // Spawn a thread to read stderr (dd progress)
+    // Spawn stdout reader in a separate thread (for both status messages and dd progress)
     let image_size_clone = image_size;
-    let mut output_clone = output.clone();
-    let stderr_handle = std::thread::spawn(move || {
+    let progress_tx_clone = progress_tx.clone();
+    std::thread::spawn(move || {
         use std::io::Read;
-        let mut stderr_bytes = stderr_reader;
+        let mut stdout_reader = BufReader::new(stdout);
         let mut buffer = vec![0u8; 8192];
         let mut accumulated = String::new();
 
         loop {
-            match stderr_bytes.read(&mut buffer) {
-                Ok(0) => break, // EOF
+            match stdout_reader.read(&mut buffer) {
+                Ok(0) => {
+                    debug_log!("stdout EOF reached");
+                    break;
+                }
                 Ok(n) => {
                     let chunk = String::from_utf8_lossy(&buffer[..n]);
                     accumulated.push_str(&chunk);
+                    debug_log!(
+                        "stdout chunk ({} bytes): {:?}",
+                        n,
+                        &chunk[..chunk.len().min(100)]
+                    );
 
-                    // Process complete lines and progress updates
-                    // dd status=progress outputs lines with \r (carriage return)
+                    // Process STATUS: messages
+                    for line in accumulated.lines() {
+                        if line.starts_with("STATUS:") {
+                            let message = line.strip_prefix("STATUS:").unwrap_or(line).to_string();
+                            let _ = status_tx.clone().try_send(message);
+                        }
+                    }
+
+                    // Process dd progress updates (separated by \r)
                     let parts: Vec<&str> = accumulated.split('\r').collect();
-
-                    // Keep the last incomplete part
                     if parts.len() > 1 {
                         for part in &parts[..parts.len() - 1] {
-                            if !part.is_empty() && part.contains("bytes") {
-                                // Parse: "123456789 bytes (123 MB, 456 GB) copied, ..."
-                                // or:     "123456789 bytes copied, ..."
-                                if let Some(bytes_str) = part.trim().split_whitespace().next() {
+                            if !part.is_empty()
+                                && part.contains("bytes")
+                                && !part.starts_with("STATUS:")
+                            {
+                                debug_log!("Found progress: {}", part);
+                                // Parse dd output: "123456789 bytes (123 MB, 117 MiB) copied..."
+                                let parts_vec: Vec<&str> = part.trim().split_whitespace().collect();
+
+                                if let Some(bytes_str) = parts_vec.first() {
                                     if let Ok(bytes_written) = bytes_str.parse::<u64>() {
                                         let progress = (bytes_written as f64
                                             / image_size_clone as f64)
                                             .min(1.0);
-                                        let _ = futures::executor::block_on(
-                                            output_clone
-                                                .send(FlashProgress::Progress(progress as f32)),
+
+                                        // Parse speed (last token before the last, e.g., "4.0" from "4.0 MB/s")
+                                        let speed_mb_s = if parts_vec.len() >= 2 {
+                                            parts_vec[parts_vec.len() - 2]
+                                                .replace(',', ".")
+                                                .parse::<f32>()
+                                                .unwrap_or(0.0)
+                                        } else {
+                                            0.0
+                                        };
+
+                                        debug_log!(
+                                            "Progress: {:.1}% ({} / {} bytes) @ {:.1} MB/s",
+                                            progress * 100.0,
+                                            bytes_written,
+                                            image_size_clone,
+                                            speed_mb_s
                                         );
+                                        let _ = progress_tx_clone.clone().try_send((
+                                            progress as f32,
+                                            bytes_written,
+                                            speed_mb_s,
+                                        ));
                                     }
                                 }
                             }
@@ -194,23 +241,133 @@ echo "STATUS:Flash operation completed!"
                         accumulated = parts[parts.len() - 1].to_string();
                     }
                 }
-                Err(_) => break,
+                Err(_e) => {
+                    debug_log!("stdout read error: {}", _e);
+                    break;
+                }
             }
         }
+        debug_log!("stdout reader thread exiting");
     });
 
-    // Read stdout for status messages
-    for line in stdout_reader.lines() {
-        if let Ok(line) = line {
-            if line.starts_with("STATUS:") {
-                let message = line.strip_prefix("STATUS:").unwrap_or(&line).to_string();
-                let _ = output.send(FlashProgress::Message(message)).await;
+    // Spawn stderr reader in a separate thread (for dd progress)
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut stderr_reader = BufReader::new(stderr);
+        let mut buffer = vec![0u8; 8192];
+        let mut accumulated = String::new();
+
+        loop {
+            match stderr_reader.read(&mut buffer) {
+                Ok(0) => {
+                    debug_log!("stderr EOF reached");
+                    break;
+                }
+                Ok(n) => {
+                    let chunk = String::from_utf8_lossy(&buffer[..n]);
+                    accumulated.push_str(&chunk);
+                    debug_log!(
+                        "stderr chunk ({} bytes): {:?}",
+                        n,
+                        &chunk[..chunk.len().min(200)]
+                    );
+
+                    // Process dd progress updates (separated by \r - carriage return)
+                    let parts: Vec<&str> = accumulated.split('\r').collect();
+                    if parts.len() > 1 {
+                        for part in &parts[..parts.len() - 1] {
+                            if !part.is_empty() && part.contains("bytes") {
+                                debug_log!("Found dd progress: {}", part);
+                                // Parse dd output: "123456789 bytes (123 MB, 117 MiB) copied..."
+                                let parts_vec: Vec<&str> = part.trim().split_whitespace().collect();
+
+                                if let Some(bytes_str) = parts_vec.first() {
+                                    if let Ok(bytes_written) = bytes_str.parse::<u64>() {
+                                        let progress = (bytes_written as f64
+                                            / image_size_clone as f64)
+                                            .min(1.0);
+
+                                        // Parse speed (last token before the last, e.g., "4.0" from "4.0 MB/s")
+                                        let speed_mb_s = if parts_vec.len() >= 2 {
+                                            parts_vec[parts_vec.len() - 2]
+                                                .replace(',', ".")
+                                                .parse::<f32>()
+                                                .unwrap_or(0.0)
+                                        } else {
+                                            0.0
+                                        };
+
+                                        debug_log!(
+                                            "Progress: {:.1}% ({} / {} bytes) @ {:.1} MB/s",
+                                            progress * 100.0,
+                                            bytes_written,
+                                            image_size_clone,
+                                            speed_mb_s
+                                        );
+                                        let _ = progress_tx.clone().try_send((
+                                            progress as f32,
+                                            bytes_written,
+                                            speed_mb_s,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        accumulated = parts[parts.len() - 1].to_string();
+                    }
+                }
+                Err(_e) => {
+                    debug_log!("stderr read error: {}", _e);
+                    break;
+                }
             }
         }
-    }
+        debug_log!("stderr reader thread exiting");
+    });
 
-    // Wait for stderr thread
-    let _ = stderr_handle.join();
+    // Forward progress and status updates to the output channel
+    let mut last_progress = 0.0_f32;
+    loop {
+        // Check if child process has exited first
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                // Process still running, check for updates
+            }
+            Err(e) => {
+                return Err(format!("Error checking process status: {}", e));
+            }
+        }
+
+        // Try to get progress update (non-blocking)
+        if let Ok(Some((p, bytes, speed))) = progress_rx.try_next() {
+            debug_log!(
+                "Received progress from channel: {:.1}% @ {:.1} MB/s",
+                p * 100.0,
+                speed
+            );
+            // Only send if progress changed significantly (avoid flooding)
+            if (p - last_progress).abs() > 0.01 || p >= 1.0 {
+                debug_log!("Sending progress to UI: {:.1}%", p * 100.0);
+                let _ = output.send(FlashProgress::Progress(p, bytes, speed)).await;
+                last_progress = p;
+            } else {
+                debug_log!(
+                    "Skipping progress update (too small change): {:.1}% (last: {:.1}%)",
+                    p * 100.0,
+                    last_progress * 100.0
+                );
+            }
+        }
+
+        // Try to get status update (non-blocking)
+        if let Ok(Some(msg)) = status_rx.try_next() {
+            let _ = output.send(FlashProgress::Message(msg)).await;
+        }
+
+        // Small delay to avoid busy-waiting
+        futures_timer::Delay::new(std::time::Duration::from_millis(100)).await;
+    }
 
     // Wait for process completion
     let status = child

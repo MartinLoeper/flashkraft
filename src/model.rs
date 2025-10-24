@@ -130,6 +130,12 @@ pub struct FlashKraft {
     /// Current flash progress (0.0 to 1.0), None if not flashing
     pub flash_progress: Option<f32>,
 
+    /// Bytes written during flash operation
+    pub flash_bytes_written: u64,
+
+    /// Current transfer speed in MB/s
+    pub flash_speed_mb_s: f32,
+
     /// Error message if an error occurred
     pub error_message: Option<String>,
 
@@ -161,6 +167,8 @@ impl FlashKraft {
             selected_target: None,
             available_drives: Vec::new(),
             flash_progress: None,
+            flash_bytes_written: 0,
+            flash_speed_mb_s: 0.0,
             error_message: None,
             device_selection_open: false,
             flashing_active: false,
@@ -196,6 +204,8 @@ impl FlashKraft {
         self.selected_image = None;
         self.selected_target = None;
         self.flash_progress = None;
+        self.flash_bytes_written = 0;
+        self.flash_speed_mb_s = 0.0;
         self.error_message = None;
         self.device_selection_open = false;
         self.flashing_active = false;
@@ -205,6 +215,9 @@ impl FlashKraft {
     pub fn cancel_selections(&mut self) {
         self.selected_image = None;
         self.selected_target = None;
+        self.flash_progress = None;
+        self.flash_bytes_written = 0;
+        self.flash_speed_mb_s = 0.0;
         self.error_message = None;
         self.device_selection_open = false;
         self.flashing_active = false;

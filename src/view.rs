@@ -37,8 +37,7 @@ pub fn view(state: &FlashKraft) -> Element<'_, Message> {
         view_complete()
     } else if state.is_flashing() {
         // Currently flashing
-        let progress = state.flash_progress.unwrap_or(0.0);
-        view_flashing(progress)
+        view_flashing(state)
     } else if state.has_error() {
         // Error occurred
         let error = state.error_message.as_deref().unwrap_or("Unknown error");
@@ -462,16 +461,52 @@ fn view_device_row<'a>(
 // ============================================================================
 
 /// Flashing progress view
-fn view_flashing(progress: f32) -> Element<'static, Message> {
+fn view_flashing(state: &FlashKraft) -> Element<'_, Message> {
+    let progress = state.flash_progress.unwrap_or(0.0);
     let progress_percent = (progress * 100.0) as u32;
+    let speed_mb_s = state.flash_speed_mb_s;
+
+    // Calculate ETA
+    let eta_text = if speed_mb_s > 0.0 && progress > 0.0 {
+        let bytes_written = state.flash_bytes_written;
+        let total_bytes = state
+            .selected_image
+            .as_ref()
+            .map(|img| (img.size_mb * 1024.0 * 1024.0) as u64)
+            .unwrap_or(0);
+        let bytes_remaining = total_bytes.saturating_sub(bytes_written);
+        let speed_bytes_s = speed_mb_s * 1024.0 * 1024.0;
+        let eta_seconds = (bytes_remaining as f32 / speed_bytes_s) as u64;
+
+        let minutes = eta_seconds / 60;
+        let seconds = eta_seconds % 60;
+        format!("ETA: {}m{}s", minutes, seconds)
+    } else {
+        "ETA: calculating...".to_string()
+    };
+
+    let speed_text = if speed_mb_s > 0.0 {
+        format!("{:.1} MB/s", speed_mb_s)
+    } else {
+        "-- MB/s".to_string()
+    };
 
     let content = column![
         icons::icon(Bootstrap::LightningFill, 80.0),
-        text("Flashing...").size(32),
+        text(format!("Flashing... {}%", progress_percent)).size(32),
         Space::with_height(20),
         progress_bar(0.0..=1.0, progress),
-        Space::with_height(10),
-        text(format!("{}%", progress_percent)).size(18),
+        Space::with_height(15),
+        row![
+            text(speed_text).size(16),
+            Space::with_width(40),
+            text(eta_text).size(16),
+        ]
+        .align_y(Alignment::Center),
+        Space::with_height(20),
+        button(text("Cancel").size(14))
+            .on_press(Message::CancelFlash)
+            .padding(10),
     ]
     .spacing(10)
     .align_x(Alignment::Center)
