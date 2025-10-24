@@ -1,1 +1,22 @@
-## [0.1.1] - 2025-10-24
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## 0.1.2 - 2025-10-24
+### ♻️ Refactor
+- Refactor Elm Architecture methods into core/state.rs
+### ➕ Added
+- Add initial project structure with Elm Architecture and real device
+- Add theme picker and support for dynamic themes Add theme picker and
+- Add CI, release workflow, examples, VHS demos, and docs
+- Add persistent theme storage using sled
+### 📦 Other Changes
+- Initial commit
+- Make device selector height fill available space
+- Remove architecture and UI documentation from docs
+- Show flash speed and ETA during flashing process
+- Restructure codebase into core, domain, components, and utils modules
+- Bump version to 0.1.1 and update bump_version.sh script
+- Replace changelog with release header and add cliff.toml config
+### 🔄 Updated
+- Update README to reflect new project structure and dependencies
