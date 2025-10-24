@@ -156,21 +156,45 @@ echo "STATUS:Flash operation completed!"
     let image_size_clone = image_size;
     let mut output_clone = output.clone();
     let stderr_handle = std::thread::spawn(move || {
-        for line in stderr_reader.lines() {
-            if let Ok(line) = line {
-                // Parse dd progress output
-                // Format: "123456789 bytes (123 MB) copied, 5 s, 24.7 MB/s"
-                if line.contains("bytes") && (line.contains("copied") || line.contains("MB/s")) {
-                    if let Some(bytes_str) = line.split_whitespace().next() {
-                        if let Ok(bytes_written) = bytes_str.parse::<u64>() {
-                            let progress =
-                                (bytes_written as f64 / image_size_clone as f64).min(1.0);
-                            let _ = futures::executor::block_on(
-                                output_clone.send(FlashProgress::Progress(progress as f32)),
-                            );
+        use std::io::Read;
+        let mut stderr_bytes = stderr_reader;
+        let mut buffer = vec![0u8; 8192];
+        let mut accumulated = String::new();
+
+        loop {
+            match stderr_bytes.read(&mut buffer) {
+                Ok(0) => break, // EOF
+                Ok(n) => {
+                    let chunk = String::from_utf8_lossy(&buffer[..n]);
+                    accumulated.push_str(&chunk);
+
+                    // Process complete lines and progress updates
+                    // dd status=progress outputs lines with \r (carriage return)
+                    let parts: Vec<&str> = accumulated.split('\r').collect();
+
+                    // Keep the last incomplete part
+                    if parts.len() > 1 {
+                        for part in &parts[..parts.len() - 1] {
+                            if !part.is_empty() && part.contains("bytes") {
+                                // Parse: "123456789 bytes (123 MB, 456 GB) copied, ..."
+                                // or:     "123456789 bytes copied, ..."
+                                if let Some(bytes_str) = part.trim().split_whitespace().next() {
+                                    if let Ok(bytes_written) = bytes_str.parse::<u64>() {
+                                        let progress = (bytes_written as f64
+                                            / image_size_clone as f64)
+                                            .min(1.0);
+                                        let _ = futures::executor::block_on(
+                                            output_clone
+                                                .send(FlashProgress::Progress(progress as f32)),
+                                        );
+                                    }
+                                }
+                            }
                         }
+                        accumulated = parts[parts.len() - 1].to_string();
                     }
                 }
+                Err(_) => break,
             }
         }
     });

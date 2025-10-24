@@ -4,6 +4,7 @@
 //! the application state. Following the Elm Architecture, the
 //! model is immutable and only changes through the update function.
 
+use crate::storage::Storage;
 use iced::Theme;
 use std::path::PathBuf;
 
@@ -140,11 +141,21 @@ pub struct FlashKraft {
 
     /// Currently selected theme
     pub theme: Theme,
+
+    /// Storage for persistent preferences
+    pub storage: Option<Storage>,
 }
 
 impl FlashKraft {
     /// Create a new FlashKraft instance with default values
     pub fn new() -> Self {
+        // Try to initialize storage and load saved theme
+        let storage = Storage::new().ok();
+        let theme = storage
+            .as_ref()
+            .and_then(|s| s.load_theme())
+            .unwrap_or(Theme::Dark);
+
         Self {
             selected_image: None,
             selected_target: None,
@@ -153,7 +164,8 @@ impl FlashKraft {
             error_message: None,
             device_selection_open: false,
             flashing_active: false,
-            theme: Theme::Dark,
+            theme,
+            storage,
         }
     }
 

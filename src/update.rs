@@ -142,7 +142,15 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
 
         Message::ThemeChanged(theme) => {
             // Update the application theme
-            state.theme = theme;
+            state.theme = theme.clone();
+
+            // Save theme to persistent storage
+            if let Some(storage) = &state.storage {
+                if let Err(e) = storage.save_theme(&theme) {
+                    eprintln!("Failed to save theme preference: {}", e);
+                }
+            }
+
             Task::none()
         }
     }

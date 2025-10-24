@@ -27,6 +27,7 @@ mod flash_subscription;
 mod icons;
 mod message;
 mod model;
+mod storage;
 mod update;
 mod view;
 
