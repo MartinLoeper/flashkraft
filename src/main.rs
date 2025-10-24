@@ -7,10 +7,10 @@
 //!
 //! This application is structured around four core concepts:
 //!
-//! 1. **Model** (`model/`) - Application state
-//! 2. **Message** (`message/`) - Events that trigger state changes
-//! 3. **Update** (`update.rs`) - State transition logic
-//! 4. **View** (`view/`) - UI rendering based on state
+//! 1. **State** (`core/state.rs`) - Application state
+//! 2. **Message** (`core/message.rs`) - Events that trigger state changes
+//! 3. **Update** (`core/update.rs`) - State transition logic
+//! 4. **View** (`view.rs` + `components/`) - UI rendering based on state
 //!
 //! ## Data Flow
 //!
@@ -21,21 +21,50 @@
 //!                           ↓
 //!                    Async Task → Message
 //! ```
+//!
+//! ## Module Structure
+//!
+//! - `core/` - Core application logic (Elm Architecture)
+//!   - `state.rs` - Application state
+//!   - `message.rs` - Message definitions
+//!   - `update.rs` - Update logic
+//!   - `commands/` - Async commands (side effects)
+//!   - `storage.rs` - Persistent storage
+//!   - `flash_subscription.rs` - Flash operation subscription
+//!
+//! - `domain/` - Domain models
+//!   - `drive_info.rs` - Drive information
+//!   - `image_info.rs` - Image information
+//!
+//! - `components/` - UI components
+//!   - `header.rs` - App header
+//!   - `step_indicators.rs` - Step indicators
+//!   - `progress_line.rs` - Animated progress lines
+//!   - `selection_panels.rs` - Selection buttons
+//!   - `device_selector.rs` - Device selection overlay
+//!   - `status_views.rs` - Status views (flashing, error, complete)
+//!   - `theme_selector.rs` - Theme selector
+//!   - `animated_progress.rs` - Animated progress bar
+//!
+//! - `utils/` - Utility modules
+//!   - `icons_bootstrap_mapper.rs` - Icon utilities
+//!   - `logger.rs` - Logging macros
+//!
+//! - `view.rs` - Main view orchestration
 
-mod command;
-mod flash_subscription;
-mod icons;
-mod message;
-mod model;
-mod storage;
-mod update;
+// Utility modules must be declared first to make macros available
+#[macro_use]
+mod utils;
+
+mod components;
+mod core;
+mod domain;
 mod view;
 
 use iced::{Element, Settings, Subscription, Task};
 
-use flash_subscription::FlashProgress;
-use message::Message;
-use model::FlashKraft;
+use core::flash_subscription::FlashProgress;
+use core::{FlashKraft, Message};
 
 fn main() -> iced::Result {
     iced::application(
@@ -49,10 +78,16 @@ fn main() -> iced::Result {
         fonts: vec![iced_fonts::BOOTSTRAP_FONT_BYTES.into()],
         ..Default::default()
     })
-    .window_size((900.0, 600.0))
+    .window(iced::window::Settings {
+        size: iced::Size::new(1300.0, 700.0),
+        resizable: false,
+        decorations: true,
+        ..Default::default()
+    })
     .run_with(|| {
         let initial_state = FlashKraft::new();
-        let initial_command = Task::perform(command::load_drives(), Message::DrivesRefreshed);
+        let initial_command =
+            Task::perform(core::commands::load_drives(), Message::DrivesRefreshed);
         (initial_state, initial_command)
     })
 }
@@ -67,11 +102,13 @@ impl FlashKraft {
     /// This is the core of The Elm Architecture. All state changes
     /// flow through this function.
     fn update(&mut self, message: Message) -> Task<Message> {
-        // Optionally log messages for debugging
-        #[cfg(debug_assertions)]
-        println!("[DEBUG] Message: {:?}", message);
+        // Optionally log messages for debugging (exclude AnimationTick to avoid spam)
+        if !matches!(message, Message::AnimationTick) {
+            #[cfg(debug_assertions)]
+            println!("[DEBUG] Message: {:?}", message);
+        }
 
-        update::update(self, message)
+        core::update(self, message)
     }
 
     /// Render the user interface
@@ -84,11 +121,15 @@ impl FlashKraft {
 
     /// Subscribe to long-running operations
     ///
-    /// This enables streaming progress updates from the flash operation.
+    /// This enables streaming progress updates from the flash operation
+    /// and animation ticks for the progress bar.
     fn subscription(&self) -> Subscription<Message> {
+        let mut subscriptions = Vec::new();
+
+        // Flash progress subscription
         if self.flashing_active {
             if let (Some(image), Some(target)) = (&self.selected_image, &self.selected_target) {
-                return flash_subscription::flash_progress(
+                let flash_sub = core::flash_subscription::flash_progress(
                     image.path.clone(),
                     target.device_path.clone().into(),
                 )
@@ -100,8 +141,18 @@ impl FlashKraft {
                     FlashProgress::Completed => Message::FlashCompleted(Ok(())),
                     FlashProgress::Failed(err) => Message::FlashCompleted(Err(err)),
                 });
+                subscriptions.push(flash_sub);
             }
+
+            // Animation tick subscription (during flash)
+            let animation_sub = iced::window::frames().map(|_| Message::AnimationTick);
+            subscriptions.push(animation_sub);
+        } else {
+            // Always run animation tick for progress line glow effects
+            let animation_sub = iced::window::frames().map(|_| Message::AnimationTick);
+            subscriptions.push(animation_sub);
         }
-        Subscription::none()
+
+        Subscription::batch(subscriptions)
     }
 }

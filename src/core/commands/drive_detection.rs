@@ -1,40 +1,13 @@
-//! Commands (Side Effects) - The Elm Architecture
+//! Drive Detection Command
 //!
-//! This module contains all async functions that perform side effects.
-//! These functions are called from Commands in the update function and
-//! their results are converted back into Messages.
-//!
-//! Commands keep the update function pure by moving all I/O operations
-//! outside of the state transition logic.
+//! This module contains async functions for detecting storage drives on the system.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use rfd::AsyncFileDialog;
 use sysinfo::Disks;
 
-use crate::model::DriveInfo;
-
-/// Open a file dialog to select an image file
-///
-/// This async function shows a native file picker dialog and waits
-/// for the user to select a file (or cancel).
-///
-/// # Returns
-///
-/// `Some(PathBuf)` if a file was selected, `None` if cancelled
-pub async fn select_image_file() -> Option<PathBuf> {
-    AsyncFileDialog::new()
-        .set_title("Select Image File")
-        .add_filter(
-            "Image Files",
-            &["img", "iso", "dmg", "zip", "gz", "xz", "raw"],
-        )
-        .add_filter("All Files", &["*"])
-        .pick_file()
-        .await
-        .map(|handle| handle.path().to_path_buf())
-}
+use crate::domain::DriveInfo;
 
 /// Load all available drives from the system
 ///

@@ -6,9 +6,10 @@
 
 use iced::Task;
 
-use crate::command;
-use crate::message::Message;
-use crate::model::{FlashKraft, ImageInfo};
+use crate::core::commands;
+use crate::core::message::Message;
+use crate::core::state::FlashKraft;
+use crate::domain::ImageInfo;
 
 /// Update the application state based on a message
 ///
@@ -32,12 +33,12 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
         // ====================================================================
         Message::SelectImageClicked => {
             // Spawn async file selection dialog
-            Task::perform(command::select_image_file(), Message::ImageSelected)
+            Task::perform(commands::select_image_file(), Message::ImageSelected)
         }
 
         Message::RefreshDrivesClicked => {
             // Spawn async drive detection
-            Task::perform(command::load_drives(), Message::DrivesRefreshed)
+            Task::perform(commands::load_drives(), Message::DrivesRefreshed)
         }
 
         Message::TargetDriveClicked(drive) => {
@@ -53,7 +54,7 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
             // Open the device selection view
             state.device_selection_open = true;
             // Refresh drives when opening the view
-            Task::perform(command::load_drives(), Message::DrivesRefreshed)
+            Task::perform(commands::load_drives(), Message::DrivesRefreshed)
         }
 
         Message::CloseDeviceSelection => {
@@ -84,7 +85,7 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
             state.reset();
 
             // Refresh drives list
-            Task::perform(command::load_drives(), Message::DrivesRefreshed)
+            Task::perform(commands::load_drives(), Message::DrivesRefreshed)
         }
 
         Message::CancelClicked => {
@@ -124,6 +125,16 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
             state.flash_progress = Some(progress);
             state.flash_bytes_written = bytes;
             state.flash_speed_mb_s = speed;
+            // Update animated progress bar
+            state.animated_progress.set_progress(progress);
+            Task::none()
+        }
+
+        Message::AnimationTick => {
+            // Tick animation for progress bar effects
+            state.animated_progress.tick();
+            // Increment animation time for progress line glow effects
+            state.animation_time += 0.016; // ~60 FPS
             Task::none()
         }
 
@@ -157,6 +168,9 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
             // Update the application theme
             state.theme = theme.clone();
 
+            // Update animated progress bar theme
+            state.animated_progress.set_theme(theme.clone());
+
             // Save theme to persistent storage
             if let Some(storage) = &state.storage {
                 if let Err(e) = storage.save_theme(&theme) {
@@ -172,7 +186,7 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::DriveInfo;
+    use crate::domain::DriveInfo;
     use std::path::PathBuf;
 
     #[test]

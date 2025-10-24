@@ -3,6 +3,7 @@
 //! This module implements an Iced Subscription that monitors the flash
 //! operation and emits progress updates in real-time.
 
+use crate::flash_debug;
 use futures::SinkExt;
 use iced::stream;
 use iced::Subscription;
@@ -11,14 +12,6 @@ use std::hash::{Hash, Hasher};
 use std::io::BufReader;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-
-/// Debug logging macro that only prints in debug builds
-macro_rules! debug_log {
-    ($($arg:tt)*) => {
-        #[cfg(debug_assertions)]
-        eprintln!("[FLASH_DEBUG] {}", format!($($arg)*));
-    };
-}
 
 /// Progress event from the flash operation
 #[derive(Debug, Clone)]
@@ -174,13 +167,13 @@ echo "STATUS:Flash operation completed!"
         loop {
             match stdout_reader.read(&mut buffer) {
                 Ok(0) => {
-                    debug_log!("stdout EOF reached");
+                    flash_debug!("stdout EOF reached");
                     break;
                 }
                 Ok(n) => {
                     let chunk = String::from_utf8_lossy(&buffer[..n]);
                     accumulated.push_str(&chunk);
-                    debug_log!(
+                    flash_debug!(
                         "stdout chunk ({} bytes): {:?}",
                         n,
                         &chunk[..chunk.len().min(100)]
@@ -202,7 +195,7 @@ echo "STATUS:Flash operation completed!"
                                 && part.contains("bytes")
                                 && !part.starts_with("STATUS:")
                             {
-                                debug_log!("Found progress: {}", part);
+                                flash_debug!("Found progress: {}", part);
                                 // Parse dd output: "123456789 bytes (123 MB, 117 MiB) copied..."
                                 let parts_vec: Vec<&str> = part.trim().split_whitespace().collect();
 
@@ -222,7 +215,7 @@ echo "STATUS:Flash operation completed!"
                                             0.0
                                         };
 
-                                        debug_log!(
+                                        flash_debug!(
                                             "Progress: {:.1}% ({} / {} bytes) @ {:.1} MB/s",
                                             progress * 100.0,
                                             bytes_written,
@@ -242,12 +235,12 @@ echo "STATUS:Flash operation completed!"
                     }
                 }
                 Err(_e) => {
-                    debug_log!("stdout read error: {}", _e);
+                    flash_debug!("stdout read error: {}", _e);
                     break;
                 }
             }
         }
-        debug_log!("stdout reader thread exiting");
+        flash_debug!("stdout reader thread exiting");
     });
 
     // Spawn stderr reader in a separate thread (for dd progress)
@@ -260,13 +253,13 @@ echo "STATUS:Flash operation completed!"
         loop {
             match stderr_reader.read(&mut buffer) {
                 Ok(0) => {
-                    debug_log!("stderr EOF reached");
+                    flash_debug!("stderr EOF reached");
                     break;
                 }
                 Ok(n) => {
                     let chunk = String::from_utf8_lossy(&buffer[..n]);
                     accumulated.push_str(&chunk);
-                    debug_log!(
+                    flash_debug!(
                         "stderr chunk ({} bytes): {:?}",
                         n,
                         &chunk[..chunk.len().min(200)]
@@ -277,7 +270,7 @@ echo "STATUS:Flash operation completed!"
                     if parts.len() > 1 {
                         for part in &parts[..parts.len() - 1] {
                             if !part.is_empty() && part.contains("bytes") {
-                                debug_log!("Found dd progress: {}", part);
+                                flash_debug!("Found dd progress: {}", part);
                                 // Parse dd output: "123456789 bytes (123 MB, 117 MiB) copied..."
                                 let parts_vec: Vec<&str> = part.trim().split_whitespace().collect();
 
@@ -297,7 +290,7 @@ echo "STATUS:Flash operation completed!"
                                             0.0
                                         };
 
-                                        debug_log!(
+                                        flash_debug!(
                                             "Progress: {:.1}% ({} / {} bytes) @ {:.1} MB/s",
                                             progress * 100.0,
                                             bytes_written,
@@ -317,12 +310,12 @@ echo "STATUS:Flash operation completed!"
                     }
                 }
                 Err(_e) => {
-                    debug_log!("stderr read error: {}", _e);
+                    flash_debug!("stderr read error: {}", _e);
                     break;
                 }
             }
         }
-        debug_log!("stderr reader thread exiting");
+        flash_debug!("stderr reader thread exiting");
     });
 
     // Forward progress and status updates to the output channel
@@ -341,18 +334,18 @@ echo "STATUS:Flash operation completed!"
 
         // Try to get progress update (non-blocking)
         if let Ok(Some((p, bytes, speed))) = progress_rx.try_next() {
-            debug_log!(
+            flash_debug!(
                 "Received progress from channel: {:.1}% @ {:.1} MB/s",
                 p * 100.0,
                 speed
             );
             // Only send if progress changed significantly (avoid flooding)
             if (p - last_progress).abs() > 0.01 || p >= 1.0 {
-                debug_log!("Sending progress to UI: {:.1}%", p * 100.0);
+                flash_debug!("Sending progress to UI: {:.1}%", p * 100.0);
                 let _ = output.send(FlashProgress::Progress(p, bytes, speed)).await;
                 last_progress = p;
             } else {
-                debug_log!(
+                flash_debug!(
                     "Skipping progress update (too small change): {:.1}% (last: {:.1}%)",
                     p * 100.0,
                     last_progress * 100.0

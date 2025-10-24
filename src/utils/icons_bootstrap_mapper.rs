@@ -1,13 +1,14 @@
-//! Icons Module
+//! Bootstrap Icons Mapper Module
 //!
-//! This module provides helper functions and constants for using icons
-//! in the FlashKraft application. It uses Bootstrap Icons from iced_fonts.
+//! This utility module provides helper functions for mapping Bootstrap Icons
+//! to Iced elements in the FlashKraft application. It uses Bootstrap Icons
+//! from the iced_fonts crate.
 
 use iced::widget::text;
 use iced::Element;
 use iced_fonts::Bootstrap;
 
-use crate::message::Message;
+use crate::core::message::Message;
 
 /// Create an icon element from a Bootstrap icon
 ///

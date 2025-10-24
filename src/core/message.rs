@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use crate::model::DriveInfo;
+use crate::domain::DriveInfo;
 use iced::Theme;
 
 /// All possible messages in the application
@@ -44,6 +44,12 @@ pub enum Message {
 
     /// User clicked "Cancel" during flash operation
     CancelFlash,
+
+    // ========================================================================
+    // Animation Messages
+    // ========================================================================
+    /// Animation tick for progress bar effects
+    AnimationTick,
 
     // ========================================================================
     // Async Result Messages
