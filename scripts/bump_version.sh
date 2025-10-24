@@ -55,7 +55,7 @@ fi
 
 # Update Cargo.lock
 echo -e "${GREEN}Updating Cargo.lock...${NC}"
-cargo update -p tui-checkbox
+cargo update -p flashkraft
 
 # Check formatting
 echo -e "${GREEN}Running cargo fmt...${NC}"
