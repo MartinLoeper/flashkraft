@@ -10,7 +10,7 @@ license = "MIT"
 iced = { version = "0.13.1", features = ["advanced", "canvas"] }
 iced_aw = "0.12.2"
 iced_fonts = { version = "0.1", features = ["bootstrap"] }
-rfd = "0.14"
+rfd = "0.15"
 sysinfo = "0.30"
 futures = "0.3"
 

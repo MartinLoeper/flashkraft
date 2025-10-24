@@ -29,3 +29,15 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# VHS Generated Files
+*.gif
+*.mp4
+*.webm
+
+# Screenshots
+screenshots/
+
+# Temporary files
+*.tmp
+.vhs/
