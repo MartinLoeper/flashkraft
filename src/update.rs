@@ -139,6 +139,12 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+
+        Message::ThemeChanged(theme) => {
+            // Update the application theme
+            state.theme = theme;
+            Task::none()
+        }
     }
 }
 

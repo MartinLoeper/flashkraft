@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 
 use crate::model::DriveInfo;
+use iced::Theme;
 
 /// All possible messages in the application
 ///
@@ -66,4 +67,7 @@ pub enum Message {
     ///
     /// Contains `Ok(())` on success or `Err(message)` on failure
     FlashCompleted(Result<(), String>),
+
+    /// User changed the application theme
+    ThemeChanged(Theme),
 }

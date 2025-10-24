@@ -4,6 +4,7 @@
 //! the application state. Following the Elm Architecture, the
 //! model is immutable and only changes through the update function.
 
+use iced::Theme;
 use std::path::PathBuf;
 
 // ============================================================================
@@ -136,6 +137,9 @@ pub struct FlashKraft {
 
     /// Whether a flash operation is currently active (for subscription)
     pub flashing_active: bool,
+
+    /// Currently selected theme
+    pub theme: Theme,
 }
 
 impl FlashKraft {
@@ -149,6 +153,7 @@ impl FlashKraft {
             error_message: None,
             device_selection_open: false,
             flashing_active: false,
+            theme: Theme::Dark,
         }
     }
 

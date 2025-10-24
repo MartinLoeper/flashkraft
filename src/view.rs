@@ -5,7 +5,9 @@
 //! take state and return a description of what to display.
 
 use iced::widget::canvas::{Frame, Path, Stroke};
-use iced::widget::{button, canvas, column, container, progress_bar, row, scrollable, text, Space};
+use iced::widget::{
+    button, canvas, column, container, pick_list, progress_bar, row, scrollable, text, Space,
+};
 use iced::{Alignment, Color, Element, Length, Theme};
 
 use crate::icons;
@@ -65,26 +67,60 @@ fn view_main(state: &FlashKraft) -> Element<'_, Message> {
         return view_device_selector(state);
     }
 
-    let header = view_header();
-    let step_indicator = view_step_indicator(state);
-    let main_section = view_main_section(state);
+    let header = view_header(state);
+    let step_indicators = view_step_indicators(state);
+    let buttons = view_buttons(state);
 
-    column![header, step_indicator, main_section]
+    column![header, step_indicators, buttons]
         .spacing(30)
         .padding(20)
         .width(Length::Fill)
-        .height(Length::Fill)
         .into()
 }
 
 /// Application header
-fn view_header() -> Element<'static, Message> {
+fn view_header(state: &FlashKraft) -> Element<'_, Message> {
+    // All available themes in iced
+    let all_themes = vec![
+        Theme::Dark,
+        Theme::Light,
+        Theme::Dracula,
+        Theme::Nord,
+        Theme::SolarizedLight,
+        Theme::SolarizedDark,
+        Theme::GruvboxLight,
+        Theme::GruvboxDark,
+        Theme::CatppuccinLatte,
+        Theme::CatppuccinFrappe,
+        Theme::CatppuccinMacchiato,
+        Theme::CatppuccinMocha,
+        Theme::TokyoNight,
+        Theme::TokyoNightStorm,
+        Theme::TokyoNightLight,
+        Theme::KanagawaWave,
+        Theme::KanagawaDragon,
+        Theme::KanagawaLotus,
+        Theme::Moonfly,
+        Theme::Nightfly,
+        Theme::Oxocarbon,
+    ];
+
+    let theme_picker = pick_list(all_themes, Some(state.theme.clone()), Message::ThemeChanged)
+        .placeholder("Select theme")
+        .text_size(14.0)
+        .width(Length::Fixed(200.0));
+
     container(
         row![
-            icons::icon(Bootstrap::LightningFill, 32.0),
-            text(" FlashKraft").size(32)
+            row![
+                icons::icon(Bootstrap::LightningFill, 32.0),
+                text(" FlashKraft").size(32)
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
+            Space::with_width(Length::Fill),
+            theme_picker,
         ]
-        .spacing(10)
         .align_y(Alignment::Center),
     )
     .width(Length::Fill)
@@ -92,93 +128,75 @@ fn view_header() -> Element<'static, Message> {
     .into()
 }
 
-/// Step indicator showing progress through the workflow with animated lines
-fn view_step_indicator(state: &FlashKraft) -> Element<'_, Message> {
+/// Step indicators with connecting lines (Balena Etcher style)
+fn view_step_indicators(state: &FlashKraft) -> Element<'_, Message> {
     let has_image = state.selected_image.is_some();
     let has_target = state.selected_target.is_some();
-    let is_ready = state.is_ready_to_flash();
 
-    let step1 = column![
-        icons::icon(
-            if has_image {
-                Bootstrap::CheckCircle
-            } else {
-                Bootstrap::Image
-            },
-            40.0
-        ),
-        text("Select Image").size(14),
-    ]
-    .spacing(10)
-    .align_x(Alignment::Center);
-
-    let line1 = view_progress_line(
-        if has_image {
-            Color::from_rgb(0.3, 0.8, 0.3)
-        } else {
-            Color::from_rgb(0.5, 0.5, 0.5)
-        },
-        has_image,
-    );
-
-    let step2 = column![
-        icons::icon(
-            if has_target {
-                Bootstrap::CheckCircle
-            } else {
-                Bootstrap::DeviceHdd
-            },
-            40.0
-        ),
-        text("Select Target").size(14),
-    ]
-    .spacing(10)
-    .align_x(Alignment::Center);
-
-    let line2 = view_progress_line(
-        if has_target {
-            Color::from_rgb(0.3, 0.8, 0.3)
-        } else {
-            Color::from_rgb(0.5, 0.5, 0.5)
-        },
-        has_target,
-    );
-
-    let step3 = column![
-        icons::icon(
-            if is_ready {
-                Bootstrap::CheckCircle
-            } else {
-                Bootstrap::LightningFill
-            },
-            40.0
-        ),
-        text("Flash!").size(14),
-    ]
-    .spacing(10)
-    .align_x(Alignment::Center);
-
-    container(
-        row![step1, line1, step2, line2, step3,]
-            .spacing(20)
-            .align_y(Alignment::Center),
+    // Create step indicators - width matches button content width (220px)
+    let step1 = container(
+        column![
+            icons::icon(Bootstrap::Image, 32.0),
+            text("Select Image").size(13),
+        ]
+        .spacing(8)
+        .align_x(Alignment::Center),
     )
-    .width(Length::Fill)
-    .center_x(Length::Fill)
-    .into()
+    .width(220)
+    .center_x(220);
+
+    let step2 = container(
+        column![
+            icons::icon(Bootstrap::DeviceHdd, 32.0),
+            text("Select Target").size(13),
+        ]
+        .spacing(8)
+        .align_x(Alignment::Center),
+    )
+    .width(220)
+    .center_x(220);
+
+    let step3 = container(
+        column![
+            icons::icon(Bootstrap::LightningFill, 32.0),
+            text("Flash!").size(13),
+        ]
+        .spacing(8)
+        .align_x(Alignment::Center),
+    )
+    .width(220)
+    .center_x(220);
+
+    // Create connecting lines - longer lines to properly connect icons
+    let line1 = view_progress_line(has_image, 100.0);
+    let line2 = view_progress_line(has_target, 100.0);
+
+    container(row![step1, line1, step2, line2, step3].align_y(Alignment::Center))
+        .width(Length::Fill)
+        .center_x(Length::Fill)
+        .into()
 }
 
-/// Draw an animated progress line
-fn view_progress_line(color: Color, _completed: bool) -> Element<'static, Message> {
+/// Draw a progress line between steps
+fn view_progress_line(completed: bool, width: f32) -> Element<'static, Message> {
+    let color = if completed {
+        Color::from_rgb(0.3, 0.8, 0.3)
+    } else {
+        Color::from_rgb(0.5, 0.5, 0.5)
+    };
+
     container(
-        canvas(ProgressLine {
-            color,
-            width: 100.0,
-        })
-        .width(100.0)
-        .height(4.0),
+        canvas(ProgressLine { color, width })
+            .width(width)
+            .height(4.0),
     )
     .center_y(Length::Fill)
+    .padding(iced::Padding {
+        top: 0.0,
+        right: 0.0,
+        bottom: 30.0,
+        left: 0.0,
+    })
     .into()
 }
 
@@ -214,17 +232,17 @@ impl canvas::Program<Message> for ProgressLine {
     }
 }
 
-/// Main section with three panels
-fn view_main_section(state: &FlashKraft) -> Element<'_, Message> {
-    let image_section = view_image_section(&state.selected_image);
-    let target_section = view_target_section(&state.selected_target);
-    let flash_section = view_flash_section(state.is_ready_to_flash());
+/// Three buttons section
+fn view_buttons(state: &FlashKraft) -> Element<'_, Message> {
+    let image_button = view_image_section(&state.selected_image);
+    let target_button = view_target_section(&state.selected_target);
+    let flash_button = view_flash_section(state.is_ready_to_flash());
 
-    let main_row = row![image_section, target_section, flash_section]
+    let buttons_row = row![image_button, target_button, flash_button]
         .spacing(40)
         .align_y(Alignment::Start);
 
-    let mut content = column![main_row].spacing(20).align_x(Alignment::Center);
+    let mut content = column![buttons_row].spacing(20).align_x(Alignment::Center);
 
     // Show cancel button if something is selected
     if state.selected_image.is_some() || state.selected_target.is_some() {
@@ -272,13 +290,13 @@ fn view_image_section(image: &Option<ImageInfo>) -> Element<'_, Message> {
 
     button(
         container(content.spacing(10).align_x(Alignment::Center))
-            .width(250)
-            .height(150)
+            .width(220)
+            .height(90)
             .center_x(Length::Fill)
             .center_y(Length::Fill),
     )
     .on_press(Message::SelectImageClicked)
-    .padding(20)
+    .padding(10)
     .into()
 }
 
@@ -310,13 +328,13 @@ fn view_target_section(selected: &Option<DriveInfo>) -> Element<'_, Message> {
 
     button(
         container(content.spacing(10).align_x(Alignment::Center))
-            .width(250)
-            .height(150)
+            .width(220)
+            .height(90)
             .center_x(Length::Fill)
             .center_y(Length::Fill),
     )
     .on_press(Message::OpenDeviceSelection)
-    .padding(20)
+    .padding(10)
     .into()
 }
 
@@ -335,12 +353,12 @@ fn view_flash_section(is_ready: bool) -> Element<'static, Message> {
 
     let btn = button(
         container(content.spacing(10).align_x(Alignment::Center))
-            .width(250)
-            .height(150)
+            .width(220)
+            .height(90)
             .center_x(Length::Fill)
             .center_y(Length::Fill),
     )
-    .padding(20);
+    .padding(10);
 
     if is_ready {
         btn.on_press(Message::FlashClicked).into()
@@ -350,290 +368,177 @@ fn view_flash_section(is_ready: bool) -> Element<'static, Message> {
 }
 
 // ============================================================================
-// Device Selection Modal
+// Device Selection View
 // ============================================================================
 
-/// Device selector modal view
+/// Device selector overlay
 fn view_device_selector(state: &FlashKraft) -> Element<'_, Message> {
-    let header = row![
-        text("FlashKraft").size(46),
-        Space::with_width(Length::Fill),
-        button(icons::icon(Bootstrap::X, 20.0))
-            .on_press(Message::CloseDeviceSelection)
-            .padding(10),
+    let title = text("Select Target Drive").size(24);
+
+    let drives_list: Element<'_, Message> = if state.available_drives.is_empty() {
+        column![text("No drives detected").size(16)]
+            .spacing(10)
+            .align_x(Alignment::Center)
+            .into()
+    } else {
+        let drive_rows: Vec<Element<'_, Message>> = state
+            .available_drives
+            .iter()
+            .map(|drive| view_device_row(drive, state.selected_target.as_ref()))
+            .collect();
+
+        scrollable(column(drive_rows).spacing(10))
+            .height(Length::Fixed(300.0))
+            .into()
+    };
+
+    let refresh_button = button(
+        row![
+            icons::icon(Bootstrap::ArrowClockwise, 16.0),
+            text("Refresh").size(14)
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::RefreshDrivesClicked)
+    .padding(10);
+
+    let cancel_button = button(text("Cancel").size(14))
+        .on_press(Message::CloseDeviceSelection)
+        .padding(10);
+
+    let content = column![
+        title,
+        Space::with_height(20),
+        drives_list,
+        Space::with_height(20),
+        row![refresh_button, Space::with_width(10), cancel_button].align_y(Alignment::Center)
     ]
     .spacing(10)
-    .padding(10)
-    .align_y(Alignment::Center)
-    .width(Length::Fill);
+    .padding(30)
+    .align_x(Alignment::Center);
 
-    // Table header
-    let table_header = row![
-        container(text("Name").size(14))
-            .width(Length::FillPortion(3))
-            .padding(10),
-        container(text("Size").size(14))
-            .width(Length::FillPortion(2))
-            .padding(10),
-        container(text("Location").size(14))
-            .width(Length::FillPortion(3))
-            .padding(10),
-        container(text("").size(14))
-            .width(Length::FillPortion(2))
-            .padding(10),
-    ]
-    .spacing(5)
-    .width(Length::Fill);
-
-    // Device rows
-    let device_rows: Vec<Element<'_, Message>> = state
-        .available_drives
-        .iter()
-        .map(|drive| view_device_row(drive, state))
-        .collect();
-
-    let devices_list: Element<'_, Message> = if device_rows.is_empty() {
-        container(
-            column![
-                text("No drives detected").size(16),
-                text("Please insert a USB drive or SD card").size(12),
-                button(text("Refresh").size(14))
-                    .on_press(Message::RefreshDrivesClicked)
-                    .padding(10)
-            ]
-            .spacing(15)
-            .align_x(Alignment::Center)
-            .padding(40),
-        )
+    container(content)
         .width(Length::Fill)
+        .height(Length::Fill)
         .center_x(Length::Fill)
+        .center_y(Length::Fill)
         .into()
+}
+
+/// Single drive row in device selector
+fn view_device_row<'a>(
+    drive: &'a DriveInfo,
+    selected: Option<&'a DriveInfo>,
+) -> Element<'a, Message> {
+    let is_selected = selected.map_or(false, |s| s.device_path == drive.device_path);
+
+    let icon = if is_selected {
+        icons::icon(Bootstrap::CheckCircleFill, 40.0)
     } else {
-        column(device_rows).spacing(2).width(Length::Fill).into()
+        icons::icon(Bootstrap::DeviceHdd, 40.0)
     };
 
-    // Footer with action buttons
-    let selected_count = if state.selected_target.is_some() {
-        1
-    } else {
-        0
-    };
-    let footer = row![
-        button(text("Cancel").size(14))
-            .on_press(Message::CloseDeviceSelection)
-            .padding(12),
-        Space::with_width(Length::Fill),
-        button(text(format!("Select {}", selected_count)).size(14)).padding(12),
+    let name_text = text(&drive.name).size(18);
+    let size_text = text(format!("{:.2} GB", drive.size_gb)).size(14);
+    let mount_text = text(&drive.mount_point).size(12);
+    let device_text = text(&drive.device_path).size(12);
+
+    let info = column![
+        name_text,
+        row![size_text, text(" • ").size(14), mount_text].spacing(5),
+        device_text
     ]
-    .spacing(20)
-    .align_y(Alignment::Center)
-    .width(Length::Fill);
+    .spacing(5);
 
-    // Main modal container
-    container(
-        column![
-            header,
-            Space::with_height(20),
-            container(table_header)
-                .style(container::bordered_box)
-                .padding(5),
-            Space::with_height(2),
-            container(scrollable(devices_list).height(Length::Fixed(400.0)))
-                .style(container::bordered_box)
-                .padding(10),
-            Space::with_height(20),
-            footer,
-        ]
-        .spacing(0)
-        .width(Length::Fixed(800.0))
-        .padding(20),
+    button(
+        container(
+            row![icon, info]
+                .spacing(20)
+                .align_y(Alignment::Center)
+                .padding(15),
+        )
+        .width(Length::Fill),
     )
-    .style(container::bordered_box)
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .center_x(Length::Fill)
-    .center_y(Length::Fill)
+    .on_press(Message::TargetDriveClicked(drive.clone()))
+    .padding(5)
     .into()
 }
 
-/// Individual device row in the selector table
-fn view_device_row<'a>(drive: &'a DriveInfo, state: &'a FlashKraft) -> Element<'a, Message> {
-    // Determine status badges
-    let mut status_badges: Vec<Element<'_, Message>> = Vec::new();
-
-    // Check if drive is too small (less than 1 GB)
-    if drive.size_gb < 1.0 {
-        status_badges.push(
-            container(text("Too small").size(10))
-                .style(container::bordered_box)
-                .padding(4)
-                .into(),
-        );
-    }
-
-    // Check if it's a system drive (contains certain paths)
-    let is_system = drive.mount_point.contains("/home")
-        || drive.mount_point == "/"
-        || drive.mount_point.contains("SWAP");
-    if is_system {
-        status_badges.push(
-            container(text("System drive").size(10))
-                .style(container::bordered_box)
-                .padding(4)
-                .into(),
-        );
-    }
-
-    // Check if it's the source drive (if image is on this drive)
-    if let Some(ref img) = state.selected_image {
-        if img.path.starts_with(&drive.mount_point) {
-            status_badges.push(
-                container(text("Source drive").size(10))
-                    .style(container::bordered_box)
-                    .padding(4)
-                    .into(),
-            );
-        }
-    }
-
-    let status_column: Element<'_, Message> = if status_badges.is_empty() {
-        container(text("").size(10))
-            .width(Length::FillPortion(2))
-            .padding(10)
-            .into()
-    } else {
-        container(row(status_badges).spacing(5))
-            .width(Length::FillPortion(2))
-            .padding(10)
-            .into()
-    };
-
-    let warning_element: Element<'_, Message> = if is_system {
-        icons::icon(Bootstrap::ExclamationTriangle, 14.0)
-    } else {
-        Space::with_width(0).into()
-    };
-
-    let row_element: Element<'_, Message> = row![
-        container(
-            row![warning_element, text(&drive.name).size(14),]
-                .spacing(5)
-                .align_y(Alignment::Center)
-        )
-        .width(Length::FillPortion(3))
-        .padding(10),
-        container(
-            text({
-                if drive.size_gb >= 1.0 {
-                    format!("{:.2} GB", drive.size_gb)
-                } else if drive.size_gb >= 0.001 {
-                    format!("{:.2} MB", drive.size_gb * 1024.0)
-                } else {
-                    format!("{:.2} KB", drive.size_gb * 1024.0 * 1024.0)
-                }
-            })
-            .size(14)
-        )
-        .width(Length::FillPortion(2))
-        .padding(10),
-        container(text(&drive.mount_point).size(12))
-            .width(Length::FillPortion(3))
-            .padding(10),
-        status_column,
-    ]
-    .spacing(5)
-    .width(Length::Fill)
-    .into();
-
-    button(row_element)
-        .width(Length::Fill)
-        .on_press(Message::TargetDriveClicked(drive.clone()))
-        .into()
-}
-
 // ============================================================================
-// State-Specific Views
+// Status Views
 // ============================================================================
 
-/// Flashing in progress view
+/// Flashing progress view
 fn view_flashing(progress: f32) -> Element<'static, Message> {
     let progress_percent = (progress * 100.0) as u32;
 
-    // If progress is stuck at 0, show a more helpful message
-    let (progress_text, status_text) = if progress_percent == 0 {
-        (
-            "Flashing in progress...".to_string(),
-            "Check the terminal window for real-time progress updates",
-        )
-    } else {
-        (
-            format!("Flashing... {}%", progress_percent),
-            "Do not disconnect the target device",
-        )
-    };
+    let content = column![
+        icons::icon(Bootstrap::LightningFill, 80.0),
+        text("Flashing...").size(32),
+        Space::with_height(20),
+        progress_bar(0.0..=1.0, progress),
+        Space::with_height(10),
+        text(format!("{}%", progress_percent)).size(18),
+    ]
+    .spacing(10)
+    .align_x(Alignment::Center)
+    .padding(40);
 
-    container(
-        column![
-            icons::icon(Bootstrap::LightningFill, 80.0),
-            text(progress_text).size(24),
-            progress_bar(0.0..=1.0, progress).width(400).height(20),
-            text(status_text).size(14),
-            text("This may take several minutes").size(12),
-            text("Progress is shown in the terminal window")
-                .size(11)
-                .color(Color::from_rgb(0.7, 0.7, 0.7)),
-        ]
-        .spacing(20)
-        .align_x(Alignment::Center)
-        .padding(40),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .center_x(Length::Fill)
-    .center_y(Length::Fill)
-    .into()
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into()
 }
 
 /// Error view
 fn view_error(error: &str) -> Element<'_, Message> {
-    container(
-        column![
-            icons::icon(Bootstrap::ExclamationTriangleFill, 80.0),
-            text("Error").size(32),
-            text(error).size(16),
-            button(text("Try Again").size(16))
-                .on_press(Message::ResetClicked)
-                .padding(15)
-        ]
-        .spacing(20)
-        .align_x(Alignment::Center),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .center_x(Length::Fill)
-    .center_y(Length::Fill)
-    .into()
+    let content = column![
+        icons::icon(Bootstrap::ExclamationTriangleFill, 80.0),
+        text("Error").size(32),
+        Space::with_height(20),
+        text(error).size(16),
+        Space::with_height(20),
+        button(text("Try Again").size(14))
+            .on_press(Message::ResetClicked)
+            .padding(10),
+    ]
+    .spacing(10)
+    .align_x(Alignment::Center)
+    .padding(40);
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into()
 }
 
-/// View for flash complete state
+/// Flash complete view
 fn view_complete() -> Element<'static, Message> {
-    container(
-        column![
-            icons::icon(Bootstrap::CheckCircleFill, 80.0),
-            text("Flash Complete!").size(32),
-            text("You can safely remove the target device").size(16),
-            button(text("Flash Another").size(16))
-                .on_press(Message::ResetClicked)
-                .padding(15)
-        ]
-        .spacing(20)
-        .align_x(Alignment::Center),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .center_x(Length::Fill)
-    .center_y(Length::Fill)
-    .into()
+    let content = column![
+        icons::icon(Bootstrap::CheckCircleFill, 80.0),
+        text("Flash Complete!").size(32),
+        Space::with_height(20),
+        text("Your device is ready to use").size(16),
+        Space::with_height(20),
+        button(text("Flash Another").size(14))
+            .on_press(Message::ResetClicked)
+            .padding(10),
+    ]
+    .spacing(10)
+    .align_x(Alignment::Center)
+    .padding(40);
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into()
 }
 
 // ============================================================================
@@ -647,8 +552,7 @@ mod tests {
     #[test]
     fn test_view_renders() {
         let state = FlashKraft::new();
-        let element = view(&state);
-        // Just verify it doesn't crash
-        let _ = element;
+        let _view = view(&state);
+        // If this compiles and runs, the view renders successfully
     }
 }

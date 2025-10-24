@@ -30,7 +30,7 @@ mod model;
 mod update;
 mod view;
 
-use iced::{Element, Settings, Subscription, Task, Theme};
+use iced::{Element, Settings, Subscription, Task};
 
 use flash_subscription::FlashProgress;
 use message::Message;
@@ -43,7 +43,7 @@ fn main() -> iced::Result {
         FlashKraft::view,
     )
     .subscription(FlashKraft::subscription)
-    .theme(|_| Theme::Dark)
+    .theme(|state: &FlashKraft| state.theme.clone())
     .settings(Settings {
         fonts: vec![iced_fonts::BOOTSTRAP_FONT_BYTES.into()],
         ..Default::default()
