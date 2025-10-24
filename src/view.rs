@@ -388,7 +388,7 @@ fn view_device_selector(state: &FlashKraft) -> Element<'_, Message> {
             .collect();
 
         scrollable(column(drive_rows).spacing(10))
-            .height(Length::Fixed(300.0))
+            .height(Length::Fill)
             .into()
     };
 
@@ -451,18 +451,10 @@ fn view_device_row<'a>(
     ]
     .spacing(5);
 
-    button(
-        container(
-            row![icon, info]
-                .spacing(20)
-                .align_y(Alignment::Center)
-                .padding(15),
-        )
-        .width(Length::Fill),
-    )
-    .on_press(Message::TargetDriveClicked(drive.clone()))
-    .padding(5)
-    .into()
+    button(container(row![icon, info].spacing(20).align_y(Alignment::Center)).width(Length::Fill))
+        .on_press(Message::TargetDriveClicked(drive.clone()))
+        .padding(5)
+        .into()
 }
 
 // ============================================================================
