@@ -3,7 +3,7 @@
 //! This module contains the application header with title and theme selector.
 
 use iced::widget::{column, container, row, text, Space};
-use iced::{Alignment, Color, Element, Length, Theme};
+use iced::{Alignment, Element, Length, Theme};
 
 use crate::components::theme_selector;
 use crate::core::message::Message;
@@ -22,11 +22,7 @@ pub fn view_header(state: &FlashKraft) -> Element<'_, Message> {
                 text("FlashKraft").size(56).style(move |theme: &Theme| {
                     let palette = theme.palette();
                     iced::widget::text::Style {
-                        color: Some(Color::from_rgb(
-                            (palette.primary.r * 1.2).min(1.0),
-                            (palette.primary.g * 1.2).min(1.0),
-                            (palette.primary.b * 1.2).min(1.0),
-                        )),
+                        color: Some(palette.primary),
                     }
                 }),
             ]

@@ -313,10 +313,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Built with [Iced](https://github.com/iced-rs/iced)
 - Follows [The Elm Architecture](https://guide.elm-lang.org/architecture/)
 
-## Screenshots
-
-*Note: Add screenshots of your application here*
-
----
-
 **⚠️ Warning**: This is a demonstration project. Do not use it to write to drives containing important data. Always backup your data before performing disk operations.
