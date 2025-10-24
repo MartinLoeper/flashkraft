@@ -39,9 +39,17 @@ impl AnimatedProgress {
         }
     }
 
-    /// Update animation time
-    pub fn tick(&mut self) {
-        self.animation_time += 0.05; // Slower animation (~60 FPS frame time)
+    /// Update animation time based on transfer speed
+    ///
+    /// # Arguments
+    /// * `speed_mb_s` - Current transfer speed in MB/s to scale animation speed
+    pub fn tick(&mut self, speed_mb_s: f32) {
+        // Scale animation speed based on transfer rate
+        // - At 1 MB/s: 0.3x speed (slow)
+        // - At 20 MB/s: 1.0x speed (baseline)
+        // - At 100+ MB/s: 3.0x speed (fast, capped)
+        let speed_multiplier = (speed_mb_s / 20.0).clamp(0.3, 3.0);
+        self.animation_time += 0.05 * speed_multiplier;
         if self.animation_time > 1000.0 {
             self.animation_time = 0.0;
         }

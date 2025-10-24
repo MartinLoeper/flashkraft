@@ -131,10 +131,13 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
         }
 
         Message::AnimationTick => {
-            // Tick animation for progress bar effects
-            state.animated_progress.tick();
+            // Tick animation for progress bar effects with speed-based scaling
+            state.animated_progress.tick(state.flash_speed_mb_s);
+
             // Increment animation time for progress line glow effects
-            state.animation_time += 0.016; // ~60 FPS
+            // Scale based on transfer speed for dynamic animations
+            let speed_multiplier = (state.flash_speed_mb_s / 20.0).clamp(0.3, 3.0);
+            state.animation_time += 0.016 * speed_multiplier; // ~60 FPS baseline
             Task::none()
         }
 
