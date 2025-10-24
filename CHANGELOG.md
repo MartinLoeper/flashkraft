@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.1.2 - 2025-10-24
+## 0.1.3 - 2025-10-24
 ### ♻️ Refactor
 - Refactor Elm Architecture methods into core/state.rs
 ### ➕ Added
@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Add theme picker and support for dynamic themes Add theme picker and
 - Add CI, release workflow, examples, VHS demos, and docs
 - Add persistent theme storage using sled
+- Add Cargo.lock and update project metadata and .gitignore
 ### 📦 Other Changes
 - Initial commit
 - Make device selector height fill available space
