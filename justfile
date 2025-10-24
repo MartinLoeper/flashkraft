@@ -175,8 +175,8 @@ info:
 view-changelog:
     @cat CHANGELOG.md
 
-# Run the VHS tape to generate demo GIF
+# Run the VHS tapes to generate demo GIF
 vhs:
-    @echo "Running VHS tape to generate demo..."
+    @echo "Running VHS tapes to generate demo..."
     vhs examples/checkbox.tape
     @echo "✅ Demo generated at examples/checkbox.gif"

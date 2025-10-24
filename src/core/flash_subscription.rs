@@ -197,7 +197,7 @@ echo "STATUS:Flash operation completed!"
                             {
                                 flash_debug!("Found progress: {}", part);
                                 // Parse dd output: "123456789 bytes (123 MB, 117 MiB) copied..."
-                                let parts_vec: Vec<&str> = part.trim().split_whitespace().collect();
+                                let parts_vec: Vec<&str> = part.split_whitespace().collect();
 
                                 if let Some(bytes_str) = parts_vec.first() {
                                     if let Ok(bytes_written) = bytes_str.parse::<u64>() {
@@ -272,7 +272,7 @@ echo "STATUS:Flash operation completed!"
                             if !part.is_empty() && part.contains("bytes") {
                                 flash_debug!("Found dd progress: {}", part);
                                 // Parse dd output: "123456789 bytes (123 MB, 117 MiB) copied..."
-                                let parts_vec: Vec<&str> = part.trim().split_whitespace().collect();
+                                let parts_vec: Vec<&str> = part.split_whitespace().collect();
 
                                 if let Some(bytes_str) = parts_vec.first() {
                                     if let Ok(bytes_written) = bytes_str.parse::<u64>() {

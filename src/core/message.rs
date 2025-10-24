@@ -70,7 +70,7 @@ pub enum Message {
     FlashProgressUpdate(f32, u64, f32),
 
     /// Status message from flash operation
-    FlashStatusMessage(String),
+    Status(String),
 
     /// Result from async flash operation
     ///

@@ -2,11 +2,17 @@
 //!
 //! This module contains the main application state (FlashKraft struct)
 //! which represents the complete state of the application at any point in time.
+//!
+//! Following The Elm Architecture, this module also implements the core
+//! application methods: update, view, and subscription.
 
 use crate::components::animated_progress::AnimatedProgress;
+use crate::core::flash_subscription::FlashProgress;
 use crate::core::storage::Storage;
+use crate::core::{update, Message};
 use crate::domain::{DriveInfo, ImageInfo};
-use iced::Theme;
+use crate::view;
+use iced::{Element, Subscription, Task, Theme};
 
 /// The main application state
 ///
@@ -135,6 +141,89 @@ impl FlashKraft {
 impl Default for FlashKraft {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ============================================================================
+// Elm Architecture Implementation
+// ============================================================================
+
+impl FlashKraft {
+    /// Update the application state based on a message
+    ///
+    /// This is the core of The Elm Architecture. All state changes
+    /// flow through this function.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - The message to process
+    ///
+    /// # Returns
+    ///
+    /// A Task that may trigger async operations, or Task::none()
+    pub fn update(&mut self, message: Message) -> Task<Message> {
+        // Optionally log messages for debugging (exclude AnimationTick to avoid spam)
+        if !matches!(message, Message::AnimationTick) {
+            #[cfg(debug_assertions)]
+            println!("[DEBUG] Message: {:?}", message);
+        }
+
+        // Delegate to the update function
+        update::update(self, message)
+    }
+
+    /// Render the user interface
+    ///
+    /// This is a pure function that describes what the UI should look
+    /// like based on the current state.
+    ///
+    /// # Returns
+    ///
+    /// An Element describing the UI to render
+    pub fn view(&self) -> Element<'_, Message> {
+        // Delegate to the view function
+        view::view(self)
+    }
+
+    /// Subscribe to long-running operations
+    ///
+    /// This enables streaming progress updates from the flash operation
+    /// and animation ticks for the progress bar.
+    ///
+    /// # Returns
+    ///
+    /// A Subscription that emits messages for ongoing operations
+    pub fn subscription(&self) -> Subscription<Message> {
+        let mut subscriptions = Vec::new();
+
+        // Flash progress subscription
+        if self.flashing_active {
+            if let (Some(image), Some(target)) = (&self.selected_image, &self.selected_target) {
+                let flash_sub = crate::core::flash_subscription::flash_progress(
+                    image.path.clone(),
+                    target.device_path.clone().into(),
+                )
+                .map(|progress| match progress {
+                    FlashProgress::Progress(p, bytes, speed) => {
+                        Message::FlashProgressUpdate(p, bytes, speed)
+                    }
+                    FlashProgress::Message(msg) => Message::Status(msg),
+                    FlashProgress::Completed => Message::FlashCompleted(Ok(())),
+                    FlashProgress::Failed(err) => Message::FlashCompleted(Err(err)),
+                });
+                subscriptions.push(flash_sub);
+            }
+
+            // Animation tick subscription (during flash)
+            let animation_sub = iced::window::frames().map(|_| Message::AnimationTick);
+            subscriptions.push(animation_sub);
+        } else {
+            // Always run animation tick for progress line glow effects
+            let animation_sub = iced::window::frames().map(|_| Message::AnimationTick);
+            subscriptions.push(animation_sub);
+        }
+
+        Subscription::batch(subscriptions)
     }
 }
 

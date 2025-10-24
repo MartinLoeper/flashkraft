@@ -138,7 +138,7 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
             Task::none()
         }
 
-        Message::FlashStatusMessage(_message) => {
+        Message::Status(_message) => {
             // Log status message in debug builds
             #[cfg(debug_assertions)]
             println!("[STATUS] {}", _message);

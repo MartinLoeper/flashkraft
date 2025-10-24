@@ -7,10 +7,10 @@
 //!
 //! This application is structured around four core concepts:
 //!
-//! 1. **State** (`core/state.rs`) - Application state
-//! 2. **Message** (`core/message.rs`) - Events that trigger state changes
-//! 3. **Update** (`core/update.rs`) - State transition logic
-//! 4. **View** (`view.rs` + `components/`) - UI rendering based on state
+//! 1. **Model** - Application state (`core/state.rs`)
+//! 2. **Message** - Events that trigger state changes (`core/message.rs`)
+//! 3. **Update** - State transition logic (`core/update.rs`)
+//! 4. **View** - UI rendering based on state (`view.rs` + `components/`)
 //!
 //! ## Data Flow
 //!
@@ -25,7 +25,7 @@
 //! ## Module Structure
 //!
 //! - `core/` - Core application logic (Elm Architecture)
-//!   - `state.rs` - Application state
+//!   - `state.rs` - Application state (Model) + Elm methods
 //!   - `message.rs` - Message definitions
 //!   - `update.rs` - Update logic
 //!   - `commands/` - Async commands (side effects)
@@ -61,11 +61,13 @@ mod core;
 mod domain;
 mod view;
 
-use iced::{Element, Settings, Subscription, Task};
+use iced::{Settings, Task};
 
-use core::flash_subscription::FlashProgress;
 use core::{FlashKraft, Message};
 
+/// Application entry point
+///
+/// Sets up and runs the Iced application with The Elm Architecture.
 fn main() -> iced::Result {
     iced::application(
         "FlashKraft - OS Image Writer",
@@ -85,74 +87,13 @@ fn main() -> iced::Result {
         ..Default::default()
     })
     .run_with(|| {
+        // Initialize application state
         let initial_state = FlashKraft::new();
+
+        // Load drives on startup
         let initial_command =
             Task::perform(core::commands::load_drives(), Message::DrivesRefreshed);
+
         (initial_state, initial_command)
     })
-}
-
-// ============================================================================
-// Application Implementation - The Elm Architecture
-// ============================================================================
-
-impl FlashKraft {
-    /// Update the application state based on a message
-    ///
-    /// This is the core of The Elm Architecture. All state changes
-    /// flow through this function.
-    fn update(&mut self, message: Message) -> Task<Message> {
-        // Optionally log messages for debugging (exclude AnimationTick to avoid spam)
-        if !matches!(message, Message::AnimationTick) {
-            #[cfg(debug_assertions)]
-            println!("[DEBUG] Message: {:?}", message);
-        }
-
-        core::update(self, message)
-    }
-
-    /// Render the user interface
-    ///
-    /// This is a pure function that describes what the UI should look
-    /// like based on the current state.
-    fn view(&self) -> Element<'_, Message> {
-        view::view(self)
-    }
-
-    /// Subscribe to long-running operations
-    ///
-    /// This enables streaming progress updates from the flash operation
-    /// and animation ticks for the progress bar.
-    fn subscription(&self) -> Subscription<Message> {
-        let mut subscriptions = Vec::new();
-
-        // Flash progress subscription
-        if self.flashing_active {
-            if let (Some(image), Some(target)) = (&self.selected_image, &self.selected_target) {
-                let flash_sub = core::flash_subscription::flash_progress(
-                    image.path.clone(),
-                    target.device_path.clone().into(),
-                )
-                .map(|progress| match progress {
-                    FlashProgress::Progress(p, bytes, speed) => {
-                        Message::FlashProgressUpdate(p, bytes, speed)
-                    }
-                    FlashProgress::Message(msg) => Message::FlashStatusMessage(msg),
-                    FlashProgress::Completed => Message::FlashCompleted(Ok(())),
-                    FlashProgress::Failed(err) => Message::FlashCompleted(Err(err)),
-                });
-                subscriptions.push(flash_sub);
-            }
-
-            // Animation tick subscription (during flash)
-            let animation_sub = iced::window::frames().map(|_| Message::AnimationTick);
-            subscriptions.push(animation_sub);
-        } else {
-            // Always run animation tick for progress line glow effects
-            let animation_sub = iced::window::frames().map(|_| Message::AnimationTick);
-            subscriptions.push(animation_sub);
-        }
-
-        Subscription::batch(subscriptions)
-    }
 }

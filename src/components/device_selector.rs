@@ -73,7 +73,7 @@ fn view_device_row<'a>(
     drive: &'a DriveInfo,
     selected: Option<&'a DriveInfo>,
 ) -> Element<'a, Message> {
-    let is_selected = selected.map_or(false, |s| s.device_path == drive.device_path);
+    let is_selected = selected.is_some_and(|s| s.device_path == drive.device_path);
 
     let icon = if is_selected {
         icons::icon(Bootstrap::CheckCircleFill, 40.0)

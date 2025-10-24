@@ -5,8 +5,9 @@
 use iced::widget::canvas::{Frame, Path, Stroke};
 use iced::widget::{canvas, container};
 use iced::{Color, Element, Length, Theme};
+use std::f32::consts::TAU;
 
-use crate::core::message::Message;
+use crate::core::Message;
 
 /// Draw a progress line between steps with animation
 pub fn view_progress_line(
@@ -103,7 +104,7 @@ impl canvas::Program<Message> for ProgressLine {
 
                     // Traveling light effect (left to right)
                     // Subtract position from time for left-to-right movement
-                    let travel = (self.time * 1.2 - t * 6.28).sin() * 0.5 + 0.5;
+                    let travel = (self.time * 1.2 - t * TAU).sin() * 0.5 + 0.5;
                     let travel_intensity = (travel * travel) * 0.7 + 0.3;
 
                     // Mix colors based on position and time (left to right)

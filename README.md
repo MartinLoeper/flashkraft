@@ -1,9 +1,12 @@
 # FlashKraft 🗲
 
-A modern OS image writer application inspired by Balena Etcher and Raspberry Pi Imager, built with Rust and the [Iced](https://github.com/iced-rs/iced) GUI framework.
+[![Crates.io](https://img.shields.io/crates/v/flashkraft)](https://crates.io/crates/flashkraft)
+[![Documentation](https://docs.rs/flashkraft/badge.svg)](https://docs.rs/flashkraft)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Release](https://github.com/sorinirimies/flashkraft/actions/workflows/release.yml/badge.svg)](https://github.com/sorinirimies/flashkraft/actions/workflows/release.yml)
+[![CI](https://github.com/sorinirimies/flashkraft/actions/workflows/ci.yml/badge.svg)](https://github.com/sorinirimies/flashkraft/actions/workflows/ci.yml)
 
-![FlashKraft](https://img.shields.io/badge/Rust-1.70+-orange.svg)
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
+A modern OS image writer application inspired by Balena Etcher and Raspberry Pi Imager, built with Rust and the [Iced](https://github.com/iced-rs/iced) GUI framework.
 
 ## Features
 

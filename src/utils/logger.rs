@@ -5,7 +5,7 @@
 
 /// Debug logging macro for general application messages
 ///
-/// Only prints in debug builds. Automatically prefixes with [DEBUG].
+/// Only prints in debug builds. Automatically prefixes with `\[DEBUG\]`.
 ///
 /// # Example
 /// ```
@@ -21,7 +21,7 @@ macro_rules! debug_log {
 
 /// Debug logging macro for flash subscription messages
 ///
-/// Only prints in debug builds. Automatically prefixes with [FLASH_DEBUG].
+/// Only prints in debug builds. Automatically prefixes with `\[FLASH_DEBUG\]`.
 ///
 /// # Example
 /// ```
@@ -37,7 +37,7 @@ macro_rules! flash_debug {
 
 /// Debug logging macro for status messages
 ///
-/// Only prints in debug builds. Automatically prefixes with [STATUS].
+/// Only prints in debug builds. Automatically prefixes with `\[STATUS\]`.
 ///
 /// # Example
 /// ```
