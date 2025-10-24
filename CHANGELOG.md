@@ -2,9 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.1.5 - 2025-10-24
+### 📦 Other Changes
+- Scale animation speed based on transfer rate
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.1.4...v0.1.5
 ## 0.1.4 - 2025-10-24
 ### 📦 Other Changes
 - Remove screenshots section from README and simplify header color
+### 🔧 Chores
+- chore: bump version to 0.1.4
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.1.3...v0.1.4
 ## 0.1.3 - 2025-10-24
 ### ♻️ Refactor
