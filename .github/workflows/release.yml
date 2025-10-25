@@ -116,15 +116,7 @@ jobs:
           echo "cargo add flashkraft" >> RELEASE_CHANGELOG.md
           echo "\`\`\`" >> RELEASE_CHANGELOG.md
           echo "" >> RELEASE_CHANGELOG.md
-          echo "## 🚀 Quick Start" >> RELEASE_CHANGELOG.md
-          echo "" >> RELEASE_CHANGELOG.md
-          echo "\`\`\`rust" >> RELEASE_CHANGELOG.md
-          echo "use ratatui::style::{Color, Style};" >> RELEASE_CHANGELOG.md
-          echo "use tui_checkbox::Checkbox;" >> RELEASE_CHANGELOG.md
-          echo "" >> RELEASE_CHANGELOG.md
-          echo "let checkbox = Checkbox::new(\"Enable feature\", true)" >> RELEASE_CHANGELOG.md
-          echo "    .checkbox_style(Style::default().fg(Color::Green));" >> RELEASE_CHANGELOG.md
-          echo "\`\`\`" >> RELEASE_CHANGELOG.md
+
 
           # Show the generated release notes
           echo "Generated release notes:"
