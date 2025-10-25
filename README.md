@@ -6,7 +6,7 @@
 [![Release](https://github.com/sorinirimies/flashkraft/actions/workflows/release.yml/badge.svg)](https://github.com/sorinirimies/flashkraft/actions/workflows/release.yml)
 [![CI](https://github.com/sorinirimies/flashkraft/actions/workflows/ci.yml/badge.svg)](https://github.com/sorinirimies/flashkraft/actions/workflows/ci.yml)
 
-A lightning fast, low footprint no Electron bloat, OS image writer application built with Rust and the [Iced](https://github.com/iced-rs/iced) GUI framework.
+A lightning fast, lightweight app size and memory footprint, no Electron bloat, OS Imager application built with Rust and the [Iced](https://github.com/iced-rs/iced) GUI framework.
 ## Preview
 ![flashkraft_demo](https://github.com/user-attachments/assets/76549cb3-a65e-4a99-b638-1aac6d50c553)
 
