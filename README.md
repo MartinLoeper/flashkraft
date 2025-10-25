@@ -12,7 +12,7 @@ A lightning fast, low footprint no Electron bloat, OS image writer application b
 
 ## Features
 
-- 🎨 Small app size, Rust C like speed, clean UI, no Electron runtime bloat needed like Balena-etcher needs to use see: [Balena Etcher Electron bloat discussions](https://github.com/iced-rs/iced)
+- 🎨 Small app size, extremely low memory footprint, Rust compiled code has C like and even better speed, no Electron runtime bloat needed like Balena-etcher needs to use see: [Balena Etcher Electron bloat discussions](https://github.com/iced-rs/iced)
 - 🎨 21 beautiful Iced themes to choose from
 - 📁 Support for multiple image formats (ISO, IMG, DMG, ZIP, etc.)
 - 💾 Automatic detection of removable drives
