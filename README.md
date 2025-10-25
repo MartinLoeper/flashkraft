@@ -145,13 +145,13 @@ The view is declarative - you describe *what* the UI should look like based on s
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                                                         │
-│  User Interaction  →  Message  →  Update  →  State     │
+│  User Interaction  →  Message  →  Update  →  State      │
 │                                      ↓                  │
 │                                   Command               │
 │                                      ↓                  │
-│  Async Result  →  Message  →  Update  →  State         │
+│  Async Result  →  Message  →  Update  →  State          │
 │                                                         │
-│                    State  →  View  →  UI               │
+│                    State  →  View  →  UI                │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -261,10 +261,6 @@ flashkraft/
 - **Elm Architecture**: Pure functional state management
 - **Type-safe**: Leveraging Rust's type system
 
-## Current Status
-
-⚠️ **Note**: This is a demonstration project showcasing The Elm Architecture and modern Rust GUI development. The actual disk writing functionality uses `dd` with `pkexec` for elevated privileges. For production use in critical environments, additional safety checks and validation should be implemented.
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request. When contributing, please:
@@ -288,8 +284,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Acknowledgments
 
-- Inspired by [Balena Etcher](https://www.balena.io/etcher/)
 - Built with [Iced](https://github.com/iced-rs/iced)
 - Follows [The Elm Architecture](https://guide.elm-lang.org/architecture/)
-
-**⚠️ Warning**: This is a demonstration project. Do not use it to write to drives containing important data. Always backup your data before performing disk operations.
