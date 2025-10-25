@@ -6,6 +6,14 @@ authors = ["Your Name"]
 description = "An OS Imager app similar to Balena-Etcher written in Rust with the Iced UI Framework"
 license = "MIT"
 
+[lib]
+name = "flashkraft"
+path = "src/lib.rs"
+
+[[bin]]
+name = "flashkraft"
+path = "src/main.rs"
+
 [dependencies]
 iced = { version = "0.13.1", features = ["advanced", "canvas"] }
 iced_aw = "0.12.2"

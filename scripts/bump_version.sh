@@ -1,5 +1,5 @@
 #!/bin/bash
-# Automated version bump script for Tui Checkbox
+# Automated version bump script for FlashKraft
 # Usage: ./scripts/bump_version.sh <new_version>
 # Example: ./scripts/bump_version.sh 0.2.5
 

@@ -25,9 +25,8 @@ A lightning fast, low footprint no Electron bloat, OS image writer application b
 Working Rust examples demonstrating FlashKraft's architecture and patterns:
 
 ```bash
-cargo run --example basic_usage       # Core functionality
-cargo run --example state_machine     # State transitions
-cargo run --example custom_theme      # Theme system
+cargo run --example basic_usage       # Full FlashKraft application
+cargo run --example custom_theme      # Theme system showcase
 ```
 
 See [examples/README.md](examples/README.md) for more details.

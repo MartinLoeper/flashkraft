@@ -351,11 +351,9 @@ Sleep 2s
 Enter
 Type "📚 Comprehensive Examples"
 Enter
-Type "   • basic_usage.rs      - Core patterns"
+Type "   • basic_usage.rs      - Full application"
 Enter
 Type "   • custom_theme.rs     - Theme system"
-Enter
-Type "   • state_machine.rs    - State management"
 Enter
 Sleep 2s
 

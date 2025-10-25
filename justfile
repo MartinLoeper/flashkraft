@@ -22,9 +22,13 @@ build:
 build-release:
     cargo build --release
 
-# Run the example
+# Run the basic usage example
 run:
-    cargo run --example checkbox
+    cargo run --example basic_usage
+
+# Run the theme example
+run-theme:
+    cargo run --example custom_theme
 
 # Run tests
 test:
@@ -131,7 +135,7 @@ doc:
 
 # Watch and auto-run on file changes (requires cargo-watch)
 watch:
-    cargo watch -x "run --example checkbox"
+    cargo watch -x "run --example basic_usage"
 
 # Git: commit current changes
 commit message:
@@ -178,5 +182,5 @@ view-changelog:
 # Run the VHS tapes to generate demo GIF
 vhs:
     @echo "Running VHS tapes to generate demo..."
-    vhs examples/checkbox.tape
-    @echo "✅ Demo generated at examples/checkbox.gif"
+    vhs examples/vhs/demo-examples.tape
+    @echo "✅ Demo generated at examples/vhs/demo-examples.gif"

@@ -32,38 +32,14 @@ Screenshot examples/vhs/screenshots/example-01-basic-usage.png
 
 # Let it run
 Sleep 3s
-Screenshot examples/vhs/screenshots/example-01-basic-counter.png
+Screenshot examples/vhs/screenshots/example-01-running.png
 
 # Exit
 Ctrl+C
 Sleep 1s
 
-# Example 2: State Machine
-Type "# Example 2: State Machine - Workflow States"
-Enter
-Sleep 1s
-Type "# Using enums to model distinct application states"
-Enter
-Sleep 2s
-
-Type "cargo run --example state_machine"
-Enter
-Sleep 5s
-Screenshot examples/vhs/screenshots/example-02-state-machine-idle.png
-
-# Let it run to show different states
-Sleep 3s
-Screenshot examples/vhs/screenshots/example-02-state-machine-selected.png
-
-Sleep 3s
-Screenshot examples/vhs/screenshots/example-02-state-machine-processing.png
-
-# Exit
-Ctrl+C
-Sleep 1s
-
-# Example 3: Custom Theme
-Type "# Example 3: Custom Themes - Dynamic Switching"
+# Example 2: Custom Theme
+Type "# Example 2: Custom Themes - Dynamic Switching"
 Enter
 Sleep 1s
 Type "# 21 beautiful themes to choose from"
@@ -73,14 +49,14 @@ Sleep 2s
 Type "cargo run --example custom_theme"
 Enter
 Sleep 5s
-Screenshot examples/vhs/screenshots/example-03-theme-dark.png
+Screenshot examples/vhs/screenshots/example-02-theme-dark.png
 
 # Show theme switching
 Sleep 3s
-Screenshot examples/vhs/screenshots/example-03-theme-dracula.png
+Screenshot examples/vhs/screenshots/example-02-theme-dracula.png
 
 Sleep 3s
-Screenshot examples/vhs/screenshots/example-03-theme-nord.png
+Screenshot examples/vhs/screenshots/example-02-theme-nord.png
 
 # Exit
 Ctrl+C
@@ -91,25 +67,23 @@ Type "# Examples Summary"
 Enter
 Sleep 1s
 Enter
-Type "✓ basic_usage       - Core TEA concepts"
-Enter
-Type "✓ state_machine     - State modeling with enums"
+Type "✓ basic_usage       - Complete FlashKraft app"
 Enter
 Type "✓ custom_theme      - Dynamic theme switching"
 Enter
 Sleep 1s
 Enter
-Type "# More examples available:"
+Type "# Features demonstrated:"
 Enter
-Type "  - async_commands.rs"
+Type "  - Image file selection"
 Enter
-Type "  - subscription_progress.rs"
+Type "  - Device detection"
 Enter
-Type "  - file_dialog.rs"
+Type "  - Flash progress tracking"
 Enter
-Type "  - drive_detection.rs"
+Type "  - 21 beautiful themes"
 Enter
-Type "  - layout_composition.rs"
+Type "  - The Elm Architecture"
 Enter
 Sleep 3s
 

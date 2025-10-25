@@ -52,18 +52,8 @@
 //!
 //! - `view.rs` - Main view orchestration
 
-// Utility modules must be declared first to make macros available
-#[macro_use]
-mod utils;
-
-mod components;
-mod core;
-mod domain;
-mod view;
-
+use flashkraft::{FlashKraft, Message};
 use iced::{Settings, Task};
-
-use core::{FlashKraft, Message};
 
 /// Application entry point
 ///
@@ -91,8 +81,10 @@ fn main() -> iced::Result {
         let initial_state = FlashKraft::new();
 
         // Load drives on startup
-        let initial_command =
-            Task::perform(core::commands::load_drives(), Message::DrivesRefreshed);
+        let initial_command = Task::perform(
+            flashkraft::core::commands::load_drives(),
+            Message::DrivesRefreshed,
+        );
 
         (initial_state, initial_command)
     })
