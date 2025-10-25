@@ -2,9 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.1 - 2025-10-25
+### ➕ Added
+- Add no_run and example variables to doc tests in logger macros
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.2.0...v0.2.1
 ## 0.2.0 - 2025-10-25
 ### ♻️ Refactor
 - Refactor examples and project structure for FlashKraft library
+### 🔧 Chores
+- chore: bump version to 0.2.0
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.1.9...v0.2.0
 ## 0.1.9 - 2025-10-25
 ### 🔄 Updated
