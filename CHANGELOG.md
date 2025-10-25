@@ -2,12 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.1.8 - 2025-10-25
+## 0.1.9 - 2025-10-25
 ### 🔄 Updated
 - Update README.md
 ### 🔧 Chores
 - chore: bump version to 0.1.8
-**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.1.7...v0.1.8
+- chore: bump version to 0.1.8
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.1.7...v0.1.9
 ## 0.1.7 - 2025-10-25
 ### 📦 Other Changes
 - Remove Quick Start example from release notes generation
