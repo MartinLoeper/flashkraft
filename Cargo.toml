@@ -1,6 +1,6 @@
 [package]
 name = "flashkraft"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 authors = ["Your Name"]
 description = "An OS Imager app similar to Balena-Etcher written in Rust with the Iced UI Framework"

@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 - Update README.md
 ### 🔧 Chores
 - chore: bump version to 0.2.2
+- chore: bump version to 0.2.3
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.2.1...v0.2.3
 ## 0.2.1 - 2025-10-25
 ### ➕ Added
