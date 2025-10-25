@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.5 - 2025-10-25
+### 🐛 Bug Fixes
+- Fix cargo install command in release changelog generation
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.2.4...v0.2.5
+## 0.2.4 - 2025-10-25
+### 🔧 Chores
+- chore: bump version to 0.2.4
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.2.3...v0.2.4
 ## 0.2.3 - 2025-10-25
 ### 🔄 Updated
 - Update README.md
