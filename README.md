@@ -21,29 +21,6 @@ A lightning fast, low footprint no Electron bloat, OS image writer application b
 - 🎨 21 beautiful themes to choose from
 - 🌙 Dark theme by default
 
-## Demo & Examples
-
-### VHS Demos
-
-FlashKraft includes VHS tape files for generating animated demos and screenshots. Check out the [`vhs/`](vhs/) directory for:
-
-- **Basic Demo** - Main interface walkthrough
-- **Theme Showcase** - All 21 available themes
-- **Complete Workflow** - Full flash operation demo
-- **Quick Demo** - Fast overview for testing
-
-Generate demos:
-```bash
-./vhs/generate-all.sh
-```
-
-Or run individual tapes:
-```bash
-vhs vhs/demo-quick.tape
-```
-
-See [vhs/README.md](vhs/README.md) for more details.
-
 ### Code Examples
 
 Working Rust examples demonstrating FlashKraft's architecture and patterns:
