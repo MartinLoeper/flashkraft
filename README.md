@@ -7,6 +7,9 @@
 [![CI](https://github.com/sorinirimies/flashkraft/actions/workflows/ci.yml/badge.svg)](https://github.com/sorinirimies/flashkraft/actions/workflows/ci.yml)
 
 A modern OS image writer application inspired by Balena Etcher and Raspberry Pi Imager, built with Rust and the [Iced](https://github.com/iced-rs/iced) GUI framework.
+## Preview
+
+https://github.com/user-attachments/assets/6d82df41-ccff-4b7f-8a0c-6178360d4eb5
 
 ## Features
 
