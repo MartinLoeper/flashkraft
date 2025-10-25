@@ -113,7 +113,7 @@ jobs:
           echo "Or install with cargo:" >> RELEASE_CHANGELOG.md
           echo "" >> RELEASE_CHANGELOG.md
           echo "\`\`\`bash" >> RELEASE_CHANGELOG.md
-          echo "cargo add flashkraft" >> RELEASE_CHANGELOG.md
+          echo "cargo install flashkraft" >> RELEASE_CHANGELOG.md
           echo "\`\`\`" >> RELEASE_CHANGELOG.md
           echo "" >> RELEASE_CHANGELOG.md
 
