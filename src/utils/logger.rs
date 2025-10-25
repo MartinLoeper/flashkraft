@@ -8,7 +8,9 @@
 /// Only prints in debug builds. Automatically prefixes with `\[DEBUG\]`.
 ///
 /// # Example
-/// ```
+/// ```no_run
+/// # use flashkraft::debug_log;
+/// let path = "/path/to/image.iso";
 /// debug_log!("User selected image: {}", path);
 /// ```
 #[macro_export]
@@ -24,7 +26,9 @@ macro_rules! debug_log {
 /// Only prints in debug builds. Automatically prefixes with `\[FLASH_DEBUG\]`.
 ///
 /// # Example
-/// ```
+/// ```no_run
+/// # use flashkraft::flash_debug;
+/// let progress = 0.75;
 /// flash_debug!("Progress: {:.1}%", progress * 100.0);
 /// ```
 #[macro_export]
@@ -40,7 +44,8 @@ macro_rules! flash_debug {
 /// Only prints in debug builds. Automatically prefixes with `\[STATUS\]`.
 ///
 /// # Example
-/// ```
+/// ```no_run
+/// # use flashkraft::status_log;
 /// status_log!("Starting flash operation");
 /// ```
 #[macro_export]
@@ -54,7 +59,10 @@ macro_rules! status_log {
 /// Conditional debug logging - only logs if condition is true
 ///
 /// # Example
-/// ```
+/// ```no_run
+/// # use flashkraft::debug_if;
+/// let verbose_mode = true;
+/// let data = vec![1, 2, 3];
 /// debug_if!(verbose_mode, "Detailed info: {:?}", data);
 /// ```
 #[macro_export]
