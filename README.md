@@ -12,14 +12,13 @@ A lightning fast, low footprint no Electron bloat, OS image writer application b
 
 ## Features
 
-- 🎨 Modern, clean UI inspired by Balena Etcher
+- 🎨 Small app size, Rust C like speed, clean UI, no Electron runtime bloat needed like Balena-etcher needs to use see: [Balena Etcher Electron bloat discussions](https://github.com/iced-rs/iced)
+- 🎨 21 beautiful Iced themes to choose from
 - 📁 Support for multiple image formats (ISO, IMG, DMG, ZIP, etc.)
 - 💾 Automatic detection of removable drives
 - ⚡ Fast and efficient flashing (simulated in current version)
 - 🔒 Safe drive selection to prevent accidental data loss
 - 🎯 Progress tracking during flash operations
-- 🎨 21 beautiful themes to choose from
-- 🌙 Dark theme by default
 
 ### Code Examples
 
