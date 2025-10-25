@@ -12,7 +12,6 @@ Set PlaybackSpeed 0.8
 Type "# FlashKraft - Complete Workflow Demo"
 Enter
 Sleep 2s
-Clear
 
 # Start the application
 Type "cargo run"

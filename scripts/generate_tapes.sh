@@ -4,6 +4,13 @@
 
 set -e
 
+# Get the project root directory (parent of scripts/)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Change to project root
+cd "$PROJECT_ROOT"
+
 echo "╔════════════════════════════════════════════╗"
 echo "║   FlashKraft VHS Demo Generator           ║"
 echo "╚════════════════════════════════════════════╝"
@@ -36,11 +43,13 @@ TAPES=(
     "demo-examples"
     "demo-build"
     "demo-architecture"
+    "demo-features"
+    "demo-storage"
 )
 
 # Process each tape
 for tape in "${TAPES[@]}"; do
-    TAPE_FILE="examples/vhs/${tape}.tape"
+    TAPE_FILE="${PROJECT_ROOT}/examples/vhs/${tape}.tape"
 
     if [ -f "$TAPE_FILE" ]; then
         echo "─────────────────────────────────────────────"
@@ -49,7 +58,7 @@ for tape in "${TAPES[@]}"; do
 
         # Run VHS
         if vhs "$TAPE_FILE"; then
-            echo "✓ Generated: examples/vhs/${tape}.gif"
+            echo "✓ Generated: ${PROJECT_ROOT}/examples/vhs/${tape}.gif"
         else
             echo "❌ Failed to process ${tape}.tape"
         fi
@@ -65,11 +74,11 @@ echo "║   Generation Complete!                     ║"
 echo "╚════════════════════════════════════════════╝"
 echo ""
 echo "Generated files:"
-echo "  📁 examples/vhs/"
-ls -lh examples/vhs/*.gif 2>/dev/null || echo "    (no GIF files generated)"
+echo "  📁 ${PROJECT_ROOT}/examples/vhs/"
+ls -lh "${PROJECT_ROOT}/examples/vhs/"*.gif 2>/dev/null || echo "    (no GIF files generated)"
 echo ""
-echo "  📁 examples/vhs/screenshots/"
-ls -1 examples/vhs/screenshots/*.png 2>/dev/null | wc -l | xargs echo "    Screenshots:"
+echo "  📁 ${PROJECT_ROOT}/examples/vhs/screenshots/"
+ls -1 "${PROJECT_ROOT}/examples/vhs/screenshots/"*.png 2>/dev/null | wc -l | xargs echo "    Screenshots:"
 echo ""
 echo "Available demos:"
 echo "  • demo-quick.gif        - Quick overview"
@@ -79,6 +88,8 @@ echo "  • demo-workflow.gif     - Complete workflow"
 echo "  • demo-examples.gif     - Code examples"
 echo "  • demo-build.gif        - Build process"
 echo "  • demo-architecture.gif - TEA explanation"
+echo "  • demo-features.gif     - Feature showcase"
+echo "  • demo-storage.gif      - Storage & persistence"
 echo ""
 echo "Usage in README:"
 echo "  ![Demo](examples/vhs/demo-basic.gif)"

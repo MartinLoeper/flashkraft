@@ -16,7 +16,6 @@ Enter
 Type "Demonstrating Rust examples with Iced framework"
 Enter
 Sleep 2s
-Clear
 
 # Example 1: Basic Usage
 Type "# Example 1: Basic Usage - Counter with TEA"
@@ -25,7 +24,6 @@ Sleep 1s
 Type "# Model-Message-Update-View pattern"
 Enter
 Sleep 2s
-Clear
 
 Type "cargo run --example basic_usage"
 Enter
@@ -39,7 +37,6 @@ Screenshot examples/vhs/screenshots/example-01-basic-counter.png
 # Exit
 Ctrl+C
 Sleep 1s
-Clear
 
 # Example 2: State Machine
 Type "# Example 2: State Machine - Workflow States"
@@ -48,7 +45,6 @@ Sleep 1s
 Type "# Using enums to model distinct application states"
 Enter
 Sleep 2s
-Clear
 
 Type "cargo run --example state_machine"
 Enter
@@ -65,7 +61,6 @@ Screenshot examples/vhs/screenshots/example-02-state-machine-processing.png
 # Exit
 Ctrl+C
 Sleep 1s
-Clear
 
 # Example 3: Custom Theme
 Type "# Example 3: Custom Themes - Dynamic Switching"
@@ -74,7 +69,6 @@ Sleep 1s
 Type "# 21 beautiful themes to choose from"
 Enter
 Sleep 2s
-Clear
 
 Type "cargo run --example custom_theme"
 Enter
@@ -91,7 +85,6 @@ Screenshot examples/vhs/screenshots/example-03-theme-nord.png
 # Exit
 Ctrl+C
 Sleep 1s
-Clear
 
 # Summary
 Type "# Examples Summary"
@@ -119,7 +112,6 @@ Enter
 Type "  - layout_composition.rs"
 Enter
 Sleep 3s
-Clear
 
 Type "# Run any example with:"
 Enter

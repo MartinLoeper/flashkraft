@@ -14,7 +14,6 @@ Sleep 1s
 Type "# Quick Demo"
 Enter
 Sleep 2s
-Clear
 
 # Show build command
 Type "cargo build --release"
@@ -22,7 +21,6 @@ Enter
 Sleep 3s
 
 # Run the application
-Clear
 Type "cargo run"
 Enter
 Sleep 5s
@@ -43,7 +41,6 @@ Ctrl+C
 Sleep 1s
 
 # Done
-Clear
 Type "Demo complete! ✓"
 Enter
 Sleep 1s
