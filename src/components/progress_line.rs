@@ -24,7 +24,7 @@ pub fn view_progress_line(
             theme: theme.clone(),
         })
         .width(width)
-        .height(30.0), // Increased height for glow effect
+        .height(10.0), // Height for glow effect
     )
     .center_y(Length::Fill)
     .into()
@@ -89,7 +89,7 @@ impl canvas::Program<Message> for ProgressLine {
             // Draw glow layers using rounded rectangles for proper rounded ends
             for glow_layer in 0..5 {
                 let glow_intensity = 1.0 - (glow_layer as f32 * 0.18);
-                let glow_width = 4.0 + (glow_layer as f32 * 3.0);
+                let glow_width = 2.0 + (glow_layer as f32 * 1.2);
 
                 // Draw segments along the line for animated effect
                 let segments = 50;
@@ -150,7 +150,7 @@ impl canvas::Program<Message> for ProgressLine {
                 (primary.b * 1.1).min(1.0),
             );
 
-            let line_height = 3.0;
+            let line_height = 1.0;
             let rounded_rect = Path::rounded_rectangle(
                 iced::Point::new(0.0, center_y - line_height / 2.0),
                 iced::Size::new(self.width, line_height),
@@ -160,7 +160,7 @@ impl canvas::Program<Message> for ProgressLine {
         } else {
             // Simple gray line with rounded ends for incomplete state
             let gray_color = Color::from_rgb(0.4, 0.4, 0.4);
-            let line_height = 3.0;
+            let line_height = 1.0;
 
             let rounded_rect = Path::rounded_rectangle(
                 iced::Point::new(0.0, center_y - line_height / 2.0),
