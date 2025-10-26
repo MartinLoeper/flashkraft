@@ -2,9 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.9 - 2025-10-26
+### 📦 Other Changes
+- Reduce progress line and glow thickness for sleeker look
+- bump version
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.2.6...v0.2.9
 ## 0.2.6 - 2025-10-26
 ### ➕ Added
 - Add cancellation support to flash operation
+### 🔧 Chores
+- chore: bump version to 0.2.6
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.2.5...v0.2.6
 ## 0.2.5 - 2025-10-25
 ### 🐛 Bug Fixes
