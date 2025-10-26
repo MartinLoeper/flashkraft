@@ -12,6 +12,10 @@ use std::hash::{Hash, Hasher};
 use std::io::BufReader;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 /// Progress event from the flash operation
 #[derive(Debug, Clone)]
@@ -27,7 +31,11 @@ pub enum FlashProgress {
 }
 
 /// Create a subscription that monitors flash progress
-pub fn flash_progress(image_path: PathBuf, device_path: PathBuf) -> Subscription<FlashProgress> {
+pub fn flash_progress(
+    image_path: PathBuf,
+    device_path: PathBuf,
+    cancel_token: Arc<AtomicBool>,
+) -> Subscription<FlashProgress> {
     // Create a unique ID for this subscription based on the paths
     let mut hasher = DefaultHasher::new();
     image_path.hash(&mut hasher);
@@ -38,8 +46,13 @@ pub fn flash_progress(image_path: PathBuf, device_path: PathBuf) -> Subscription
         id,
         stream::channel(100, move |mut output| async move {
             // Run the flash operation and stream progress
-            let result =
-                run_flash_operation(image_path.clone(), device_path.clone(), output.clone()).await;
+            let result = run_flash_operation(
+                image_path.clone(),
+                device_path.clone(),
+                output.clone(),
+                cancel_token.clone(),
+            )
+            .await;
 
             match result {
                 Ok(_) => {
@@ -61,6 +74,7 @@ async fn run_flash_operation(
     image_path: PathBuf,
     device_path: PathBuf,
     mut output: futures::channel::mpsc::Sender<FlashProgress>,
+    cancel_token: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let image_path_str = image_path
         .to_str()
@@ -321,6 +335,16 @@ echo "STATUS:Flash operation completed!"
     // Forward progress and status updates to the output channel
     let mut last_progress = 0.0_f32;
     loop {
+        // Check for cancellation request
+        if cancel_token.load(Ordering::SeqCst) {
+            flash_debug!("Cancellation requested, killing child process");
+            // Kill the child process
+            let _ = child.kill();
+            // Clean up script
+            let _ = std::fs::remove_file(script_path);
+            return Err("Flash operation cancelled by user".to_string());
+        }
+
         // Check if child process has exited first
         match child.try_wait() {
             Ok(Some(_)) => break,

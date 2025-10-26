@@ -13,6 +13,7 @@ use crate::core::{update, Message};
 use crate::domain::{DriveInfo, ImageInfo};
 use crate::view;
 use iced::{Element, Subscription, Task, Theme};
+use std::sync::{atomic::AtomicBool, Arc};
 
 /// The main application state
 ///
@@ -46,6 +47,9 @@ pub struct FlashKraft {
 
     /// Whether a flash operation is currently active (for subscription)
     pub flashing_active: bool,
+
+    /// Cancellation token for flash operation
+    pub flash_cancel_token: Arc<AtomicBool>,
 
     /// Currently selected theme
     pub theme: Theme,
@@ -84,6 +88,7 @@ impl FlashKraft {
             error_message: None,
             device_selection_open: false,
             flashing_active: false,
+            flash_cancel_token: Arc::new(AtomicBool::new(false)),
             theme,
             storage,
             animated_progress,
@@ -123,6 +128,7 @@ impl FlashKraft {
         self.error_message = None;
         self.device_selection_open = false;
         self.flashing_active = false;
+        self.flash_cancel_token = Arc::new(AtomicBool::new(false));
     }
 
     /// Cancel current selections
@@ -135,6 +141,7 @@ impl FlashKraft {
         self.error_message = None;
         self.device_selection_open = false;
         self.flashing_active = false;
+        self.flash_cancel_token = Arc::new(AtomicBool::new(false));
     }
 }
 
@@ -202,6 +209,7 @@ impl FlashKraft {
                 let flash_sub = crate::core::flash_subscription::flash_progress(
                     image.path.clone(),
                     target.device_path.clone().into(),
+                    self.flash_cancel_token.clone(),
                 )
                 .map(|progress| match progress {
                     FlashProgress::Progress(p, bytes, speed) => {
