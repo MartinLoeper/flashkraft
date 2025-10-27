@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 ### 📦 Other Changes
 - - Fix race condition where flash progress updates continued to display
 - Use theme_selector_right in status views
+### 🔧 Chores
+- chore: bump version to 0.3.1
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.3.0...v0.3.1
 ## 0.3.0 - 2025-10-27
 ### 📦 Other Changes
