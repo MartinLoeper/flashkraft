@@ -2,10 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.0 - 2025-10-27
+### 📦 Other Changes
+- Clarify Electron bloat comparison in features section
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.2.9...v0.3.0
 ## 0.2.9 - 2025-10-26
 ### 📦 Other Changes
 - Reduce progress line and glow thickness for sleeker look
 - bump version
+### 🔧 Chores
+- chore: bump version to 0.2.9
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.2.6...v0.2.9
 ## 0.2.6 - 2025-10-26
 ### ➕ Added
