@@ -12,7 +12,7 @@ A lightning fast, lightweight app size and memory footprint, no Electron bloat, 
 
 ## Features
 
-- 🎨 Small app size, extremely low memory footprint, Rust compiled code has C like and even better speed, no Electron runtime bloat needed like Balena-etcher needs to use see: [Balena Etcher Electron bloat discussions](https://github.com/iced-rs/iced)
+- 🎨 Small app size, extremely low memory footprint, Rust compiled code has C like and even better speed, no Electron runtime bloat needed, unlike Balena-Etcher needs to, [see Balena Etcher Electron bloat discussions](https://forums.balena.io/t/why-is-etcher-so-bloated/368873)
 - 🎨 21 beautiful Iced themes to choose from
 - 📁 Support for multiple image formats (ISO, IMG, DMG, ZIP, etc.)
 - 💾 Automatic detection of removable drives
