@@ -2,21 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
-### 🐛 Bug Fixes
-- Fix race condition where flash progress updates continued to display after cancellation
-  - Added cancellation checks before sending progress/status updates to UI
-  - Reader threads now exit early when cancellation is detected
-  - Prevents buffered progress updates from being displayed after cancel button is clicked
-
-### ✨ Improvements
-- Align theme selector position consistently across all views
-  - Theme selector now appears in the same top-right position in main, flashing, error, and complete views
-  - Added theme selector to error and complete views where it was previously missing
-
+## 0.3.1 - 2025-10-27
+### 📦 Other Changes
+- - Fix race condition where flash progress updates continued to display
+- Use theme_selector_right in status views
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.3.0...v0.3.1
 ## 0.3.0 - 2025-10-27
 ### 📦 Other Changes
 - Clarify Electron bloat comparison in features section
+### 🔧 Chores
+- chore: bump version to 0.3.0
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.2.9...v0.3.0
 ## 0.2.9 - 2025-10-26
 ### 📦 Other Changes
