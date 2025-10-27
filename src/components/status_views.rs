@@ -70,7 +70,7 @@ pub fn view_flashing(state: &FlashKraft) -> Element<'_, Message> {
     .padding(40);
 
     let content = column![
-        theme_selector::theme_selector_widget(&state.theme),
+        theme_selector::theme_selector_right(&state.theme),
         container(progress_content)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -101,7 +101,7 @@ pub fn view_error<'a>(state: &'a crate::core::FlashKraft, error: &'a str) -> Ele
     .padding(40);
 
     let content = column![
-        theme_selector::theme_selector_widget(&state.theme),
+        theme_selector::theme_selector_right(&state.theme),
         container(error_content)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -132,7 +132,7 @@ pub fn view_complete(state: &crate::core::FlashKraft) -> Element<'_, Message> {
     .padding(40);
 
     let content = column![
-        theme_selector::theme_selector_widget(&state.theme),
+        theme_selector::theme_selector_right(&state.theme),
         container(complete_content)
             .width(Length::Fill)
             .height(Length::Fill)
