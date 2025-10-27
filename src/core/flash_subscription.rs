@@ -172,6 +172,7 @@ echo "STATUS:Flash operation completed!"
     // Spawn stdout reader in a separate thread (for both status messages and dd progress)
     let image_size_clone = image_size;
     let progress_tx_clone = progress_tx.clone();
+    let cancel_token_clone1 = cancel_token.clone();
     std::thread::spawn(move || {
         use std::io::Read;
         let mut stdout_reader = BufReader::new(stdout);
@@ -179,6 +180,12 @@ echo "STATUS:Flash operation completed!"
         let mut accumulated = String::new();
 
         loop {
+            // Check for cancellation to stop processing early
+            if cancel_token_clone1.load(Ordering::SeqCst) {
+                flash_debug!("stdout reader thread: cancellation detected, exiting");
+                break;
+            }
+
             match stdout_reader.read(&mut buffer) {
                 Ok(0) => {
                     flash_debug!("stdout EOF reached");
@@ -258,6 +265,7 @@ echo "STATUS:Flash operation completed!"
     });
 
     // Spawn stderr reader in a separate thread (for dd progress)
+    let cancel_token_clone2 = cancel_token.clone();
     std::thread::spawn(move || {
         use std::io::Read;
         let mut stderr_reader = BufReader::new(stderr);
@@ -265,6 +273,12 @@ echo "STATUS:Flash operation completed!"
         let mut accumulated = String::new();
 
         loop {
+            // Check for cancellation to stop processing early
+            if cancel_token_clone2.load(Ordering::SeqCst) {
+                flash_debug!("stderr reader thread: cancellation detected, exiting");
+                break;
+            }
+
             match stderr_reader.read(&mut buffer) {
                 Ok(0) => {
                     flash_debug!("stderr EOF reached");
@@ -335,7 +349,7 @@ echo "STATUS:Flash operation completed!"
     // Forward progress and status updates to the output channel
     let mut last_progress = 0.0_f32;
     loop {
-        // Check for cancellation request
+        // Check for cancellation request FIRST before processing any updates
         if cancel_token.load(Ordering::SeqCst) {
             flash_debug!("Cancellation requested, killing child process");
             // Kill the child process
@@ -358,6 +372,12 @@ echo "STATUS:Flash operation completed!"
 
         // Try to get progress update (non-blocking)
         if let Ok(Some((p, bytes, speed))) = progress_rx.try_next() {
+            // Check cancellation again before sending to UI
+            if cancel_token.load(Ordering::SeqCst) {
+                flash_debug!("Cancellation detected, discarding progress update");
+                continue;
+            }
+
             flash_debug!(
                 "Received progress from channel: {:.1}% @ {:.1} MB/s",
                 p * 100.0,
@@ -379,6 +399,11 @@ echo "STATUS:Flash operation completed!"
 
         // Try to get status update (non-blocking)
         if let Ok(Some(msg)) = status_rx.try_next() {
+            // Check cancellation again before sending to UI
+            if cancel_token.load(Ordering::SeqCst) {
+                flash_debug!("Cancellation detected, discarding status update");
+                continue;
+            }
             let _ = output.send(FlashProgress::Message(msg)).await;
         }
 

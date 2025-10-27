@@ -31,14 +31,14 @@ use crate::core::{FlashKraft, Message};
 pub fn view(state: &FlashKraft) -> Element<'_, Message> {
     let content = if state.is_flash_complete() {
         // Flash completed successfully
-        status_views::view_complete()
+        status_views::view_complete(state)
     } else if state.is_flashing() {
         // Currently flashing
         status_views::view_flashing(state)
     } else if state.has_error() {
         // Error occurred
         let error = state.error_message.as_deref().unwrap_or("Unknown error");
-        status_views::view_error(error)
+        status_views::view_error(state, error)
     } else {
         // Normal main view
         view_main(state)

@@ -70,7 +70,7 @@ pub fn view_flashing(state: &FlashKraft) -> Element<'_, Message> {
     .padding(40);
 
     let content = column![
-        theme_selector::theme_selector_right(&state.theme),
+        theme_selector::theme_selector_widget(&state.theme),
         container(progress_content)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -85,8 +85,8 @@ pub fn view_flashing(state: &FlashKraft) -> Element<'_, Message> {
 }
 
 /// Error view
-pub fn view_error(error: &str) -> Element<'_, Message> {
-    let content = column![
+pub fn view_error<'a>(state: &'a crate::core::FlashKraft, error: &'a str) -> Element<'a, Message> {
+    let error_content = column![
         icons::icon(Bootstrap::ExclamationTriangleFill, 80.0),
         text("Error").size(32),
         Space::with_height(20),
@@ -100,17 +100,24 @@ pub fn view_error(error: &str) -> Element<'_, Message> {
     .align_x(Alignment::Center)
     .padding(40);
 
+    let content = column![
+        theme_selector::theme_selector_widget(&state.theme),
+        container(error_content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
+    ];
+
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
         .into()
 }
 
 /// Flash complete view
-pub fn view_complete() -> Element<'static, Message> {
-    let content = column![
+pub fn view_complete(state: &crate::core::FlashKraft) -> Element<'_, Message> {
+    let complete_content = column![
         icons::icon(Bootstrap::CheckCircleFill, 80.0),
         text("Flash Complete!").size(32),
         Space::with_height(20),
@@ -124,10 +131,17 @@ pub fn view_complete() -> Element<'static, Message> {
     .align_x(Alignment::Center)
     .padding(40);
 
+    let content = column![
+        theme_selector::theme_selector_widget(&state.theme),
+        container(complete_content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
+    ];
+
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
         .into()
 }
