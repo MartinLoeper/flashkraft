@@ -2,11 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.4 - 2025-11-13
+### 📦 Other Changes
+- Simplify is_source_drive mount point check logic
+- Run CI and release workflows only on Ubuntu
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.3.3...v0.3.4
 ## 0.3.3 - 2025-11-13
 ### ➕ Added
 - Add drive/image compatibility checks and warnings
 ### 📦 Other Changes
 - Remove push and release recipes from justfile and backup
+### 🔧 Chores
+- chore: bump version to 0.3.3
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.3.2...v0.3.3
 ## 0.3.2 - 2025-10-30
 ### ➕ Added
