@@ -59,6 +59,12 @@ pub async fn load_drives() -> Vec<DriveInfo> {
                 continue;
             }
 
+            // Check if this is a system drive by checking if it's mounted at critical paths
+            let is_system = check_if_system_drive(&device_name);
+
+            // Check if drive is read-only
+            let is_read_only = check_if_read_only(&device_name);
+
             // Read device size from sysfs
             let size_path = format!("/sys/block/{}/size", device_name);
             let size_sectors = std::fs::read_to_string(&size_path)
@@ -140,11 +146,13 @@ pub async fn load_drives() -> Vec<DriveInfo> {
 
                 let device_path = format!("/dev/{}", device_name);
 
-                drives.push(DriveInfo::new(
+                drives.push(DriveInfo::with_constraints(
                     display_name,
                     mount_info,
                     size_gb,
                     device_path,
+                    is_system,
+                    is_read_only,
                 ));
             }
         }
@@ -154,6 +162,53 @@ pub async fn load_drives() -> Vec<DriveInfo> {
     drives.sort_by(|a, b| a.name.cmp(&b.name));
 
     drives
+}
+
+/// Check if a device is a system drive
+///
+/// A system drive is one that contains critical system paths like /, /boot, /usr, etc.
+fn check_if_system_drive(device_name: &str) -> bool {
+    // Check if this device or any of its partitions are mounted at system locations
+    let system_mount_points = [
+        "/", "/boot", "/usr", "/var", "/home", "/opt", "/etc", "/bin", "/sbin", "/lib", "/lib64",
+    ];
+
+    // Get mounted filesystems
+    let disks = Disks::new_with_refreshed_list();
+
+    for disk in disks.list() {
+        let disk_name = disk.name().to_string_lossy().to_string();
+        let mount_point = disk.mount_point().to_string_lossy().to_string();
+
+        // Check if this disk belongs to our device
+        if disk_name.contains(device_name)
+            || disk_name.starts_with(&format!("/dev/{}", device_name))
+        {
+            // Check if mounted at a system location
+            for sys_mount in &system_mount_points {
+                if mount_point == *sys_mount {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Check if a device is read-only
+///
+/// Checks the 'ro' flag in /sys/block to determine if a device is read-only.
+fn check_if_read_only(device_name: &str) -> bool {
+    let ro_path = format!("/sys/block/{}/ro", device_name);
+
+    if let Ok(content) = std::fs::read_to_string(&ro_path) {
+        if let Ok(value) = content.trim().parse::<u8>() {
+            return value == 1;
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -167,5 +222,19 @@ mod tests {
         let disks = Disks::new_with_refreshed_list();
         // Just verify it doesn't crash - any result is valid
         let _ = disks.list();
+    }
+
+    #[test]
+    fn test_check_if_read_only() {
+        // This test will check the actual system, so results may vary
+        // Just verify it doesn't crash
+        let _ = check_if_read_only("sda");
+    }
+
+    #[test]
+    fn test_check_if_system_drive() {
+        // This test will check the actual system, so results may vary
+        // Just verify it doesn't crash
+        let _ = check_if_system_drive("sda");
     }
 }

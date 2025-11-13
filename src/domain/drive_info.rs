@@ -14,6 +14,12 @@ pub struct DriveInfo {
     pub size_gb: f64,
     /// Raw device path (e.g., /dev/sde)
     pub device_path: String,
+    /// Whether this drive is a system drive
+    pub is_system: bool,
+    /// Whether this drive is read-only (locked)
+    pub is_read_only: bool,
+    /// Whether this drive is disabled for selection
+    pub disabled: bool,
 }
 
 impl DriveInfo {
@@ -31,6 +37,38 @@ impl DriveInfo {
             mount_point,
             size_gb,
             device_path,
+            is_system: false,
+            is_read_only: false,
+            disabled: false,
+        }
+    }
+
+    /// Create a new DriveInfo instance with all fields
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the drive
+    /// * `mount_point` - Where the drive is mounted
+    /// * `size_gb` - Size in gigabytes
+    /// * `device_path` - Raw device path (e.g., /dev/sde)
+    /// * `is_system` - Whether this is a system drive
+    /// * `is_read_only` - Whether this drive is read-only
+    pub fn with_constraints(
+        name: String,
+        mount_point: String,
+        size_gb: f64,
+        device_path: String,
+        is_system: bool,
+        is_read_only: bool,
+    ) -> Self {
+        Self {
+            name,
+            mount_point,
+            size_gb,
+            device_path,
+            is_system,
+            is_read_only,
+            disabled: false,
         }
     }
 

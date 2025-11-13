@@ -63,6 +63,7 @@ fn view_main(state: &FlashKraft) -> Element<'_, Message> {
         return device_selector::view_device_selector(
             &state.available_drives,
             &state.selected_target,
+            &state.selected_image,
         );
     }
 

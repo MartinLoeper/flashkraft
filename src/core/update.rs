@@ -9,7 +9,7 @@ use iced::Task;
 use crate::core::commands;
 use crate::core::message::Message;
 use crate::core::state::FlashKraft;
-use crate::domain::ImageInfo;
+use crate::domain::{constraints, ImageInfo};
 
 /// Update the application state based on a message
 ///
@@ -120,10 +120,20 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
             // Update selected image
             state.selected_image = maybe_path.map(ImageInfo::from_path);
             state.error_message = None;
+
+            // Mark invalid drives based on the new image selection
+            constraints::mark_invalid_drives(
+                &mut state.available_drives,
+                state.selected_image.as_ref(),
+            );
+
             Task::none()
         }
 
-        Message::DrivesRefreshed(drives) => {
+        Message::DrivesRefreshed(mut drives) => {
+            // Mark invalid drives based on current image selection
+            constraints::mark_invalid_drives(&mut drives, state.selected_image.as_ref());
+
             // Update available drives list
             state.available_drives = drives;
             Task::none()
