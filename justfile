@@ -142,21 +142,6 @@ commit message:
     git add .
     git commit -m "{{message}}"
 
-# Git: push to origin
-push:
-    git push origin main
-
-# Git: push tags
-push-tags:
-    git push --tags
-
-# Full release workflow: bump version and push
-release version: (bump version)
-    @echo "Pushing to remote..."
-    git push origin main
-    git push origin v{{version}}
-    @echo "✅ Release v{{version}} complete!"
-
 # Show current version
 version:
     @grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
