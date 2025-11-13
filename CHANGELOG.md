@@ -2,9 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.3 - 2025-11-13
+### ➕ Added
+- Add drive/image compatibility checks and warnings
+### 📦 Other Changes
+- Remove push and release recipes from justfile and backup
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.3.2...v0.3.3
 ## 0.3.2 - 2025-10-30
 ### ➕ Added
 - Add repository link, categories, and keywords to Cargo.toml
+### 🔧 Chores
+- chore: bump version to 0.3.2
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.3.1...v0.3.2
 ## 0.3.1 - 2025-10-27
 ### 📦 Other Changes
