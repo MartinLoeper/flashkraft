@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 ### 📦 Other Changes
 - Simplify is_source_drive mount point check logic
 - Run CI and release workflows only on Ubuntu
+### 🔧 Chores
+- chore: bump version to 0.3.4
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.3.3...v0.3.4
 ## 0.3.3 - 2025-11-13
 ### ➕ Added
