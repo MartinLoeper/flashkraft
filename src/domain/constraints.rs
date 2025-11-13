@@ -66,10 +66,11 @@ pub fn is_source_drive(drive: &DriveInfo, image: Option<&ImageInfo>) -> bool {
         let image_path = img.path.to_string_lossy();
 
         // Simple check: if mount point is in the image path
-        if !drive.mount_point.is_empty() && drive.mount_point != drive.device_path {
-            if image_path.starts_with(&drive.mount_point) {
-                return true;
-            }
+        if !drive.mount_point.is_empty()
+            && drive.mount_point != drive.device_path
+            && image_path.starts_with(&drive.mount_point)
+        {
+            return true;
         }
 
         // Also check if the device path matches
