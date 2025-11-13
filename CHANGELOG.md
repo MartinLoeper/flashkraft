@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.5 - 2025-11-13
+### 🔧 Chores
+- chore: bump version to 0.3.5
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.3.4...v0.3.5
 ## 0.3.4 - 2025-11-13
 ### 📦 Other Changes
 - Simplify is_source_drive mount point check logic
