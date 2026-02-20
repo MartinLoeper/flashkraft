@@ -77,7 +77,14 @@ awk -v new_ver="${NEW_VERSION}" '
 # ── 2. Update the flashkraft-core workspace dependency version ────────────────
 echo -e "${GREEN}[2/7] Updating flashkraft-core workspace dependency version…${NC}"
 # The line looks like:  flashkraft-core = { path = "crates/flashkraft-core", version = "X.Y.Z" }
-sed -i "s/\(flashkraft-core = {[^}]*version = \)\"[^\"]*\"/\1\"${NEW_VERSION}\"/" Cargo.toml
+# Use awk + tmp file instead of `sed -i` to avoid BSD/GNU sed incompatibilities
+# (macOS BSD sed requires `sed -i ''` while GNU sed requires `sed -i`).
+awk -v new_ver="${NEW_VERSION}" '
+    /^flashkraft-core[[:space:]]*=/ {
+        sub(/version[[:space:]]*=[[:space:]]*"[^"]*"/, "version = \"" new_ver "\"")
+    }
+    { print }
+' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
 
 # ── 3. Update Cargo.lock ──────────────────────────────────────────────────────
 echo -e "${GREEN}[3/7] Updating Cargo.lock…${NC}"
