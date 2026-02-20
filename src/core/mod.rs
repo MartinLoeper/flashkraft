@@ -8,7 +8,9 @@
 //! - Storage/persistence
 
 pub mod commands;
+pub mod flash_helper;
 pub mod flash_subscription;
+pub mod flash_writer;
 pub mod message;
 pub mod state;
 pub mod storage;

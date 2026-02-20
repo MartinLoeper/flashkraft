@@ -1,15 +1,57 @@
 //! Flash Subscription - Real-time progress streaming
 //!
-//! This module implements an Iced Subscription that monitors the flash
-//! operation and emits progress updates in real-time.
+//! This module implements an Iced [`Subscription`] that drives the flash
+//! pipeline and forwards structured progress events to the UI.
+//!
+//! ## Architecture
+//!
+//! The flash operation is performed entirely in pure Rust by the **same
+//! binary** re-executed with elevated privileges via `pkexec`:
+//!
+//! ```text
+//! pkexec /path/to/flashkraft --flash-helper <image_path> <device_path>
+//! ```
+//!
+//! `main.rs` detects `--flash-helper` before touching any GUI code and
+//! dispatches to [`crate::core::flash_helper::run`].  The helper writes all
+//! output — progress, stage transitions, logs, and errors — to **stdout**.
+//! This subscription spawns a single blocking reader thread that ships those
+//! lines to an async channel, where the main loop parses them and forwards
+//! the appropriate [`FlashProgress`] events to the Iced runtime.
+//!
+//! ## Wire protocol (stdout of the helper process)
+//!
+//! | Prefix | Parsed as | Meaning |
+//! |--------|-----------|---------|
+//! | `STAGE:<name>` | [`ScriptLine::Stage`] | Pipeline stage transition |
+//! | `SIZE:<bytes>` | [`ScriptLine::Size`] | Total image size in bytes |
+//! | `PROGRESS:<bytes>:<speed_mb_s>` | [`ScriptLine::Progress`] | Write progress update |
+//! | `LOG:<message>` | [`ScriptLine::Log`] | Informational status message |
+//! | `ERROR:<message>` | [`ScriptLine::Error`] | Terminal error (process exits non-zero) |
+//!
+//! All parsing is handled by [`crate::core::flash_writer::parse_script_line`].
+//!
+//! ## Cancellation
+//!
+//! An [`AtomicBool`] cancel token is shared between the Iced update loop and
+//! this subscription.  Setting the token causes the subscription to kill the
+//! child process and return an error on the next poll cycle (~100 ms latency).
+//!
+//! ## Reader thread design
+//!
+//! Raw bytes from the helper's stdout are accumulated in a `String` buffer.
+//! The buffer is split on **both `\r` and `\n`** so that `dd status=progress`
+//! carriage-return updates (legacy compat) are handled identically to normal
+//! newline-delimited lines from the Rust helper.
 
+use crate::core::flash_writer::{parse_script_line, FlashStage, ScriptLine};
 use crate::flash_debug;
 use futures::SinkExt;
 use iced::stream;
 use iced::Subscription;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::io::BufReader;
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{
@@ -17,26 +59,34 @@ use std::sync::{
     Arc,
 };
 
-/// Progress event from the flash operation
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+/// Progress event emitted by the flash subscription.
 #[derive(Debug, Clone)]
 pub enum FlashProgress {
-    /// Progress with details (percentage, bytes_written, speed_mb_per_sec)
+    /// `(progress 0.0–1.0, bytes_written, speed_mb_s)`
     Progress(f32, u64, f32),
-    /// Status message
+    /// Human-readable status message for the UI
     Message(String),
-    /// Operation completed successfully
+    /// The flash operation finished successfully
     Completed,
-    /// Operation failed with error message
+    /// The flash operation failed with an error message
     Failed(String),
 }
 
-/// Create a subscription that monitors flash progress
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Create a subscription that streams [`FlashProgress`] events while the
+/// flash operation runs.
 pub fn flash_progress(
     image_path: PathBuf,
     device_path: PathBuf,
     cancel_token: Arc<AtomicBool>,
 ) -> Subscription<FlashProgress> {
-    // Create a unique ID for this subscription based on the paths
     let mut hasher = DefaultHasher::new();
     image_path.hash(&mut hasher);
     device_path.hash(&mut hasher);
@@ -45,7 +95,6 @@ pub fn flash_progress(
     Subscription::run_with_id(
         id,
         stream::channel(100, move |mut output| async move {
-            // Run the flash operation and stream progress
             let result = run_flash_operation(
                 image_path.clone(),
                 device_path.clone(),
@@ -63,13 +112,20 @@ pub fn flash_progress(
                 }
             }
 
-            // Subscription ends after completion
+            // Keep the subscription alive (Iced requirement).
             std::future::pending().await
         }),
     )
 }
 
-/// Run the flash operation with progress reporting
+// ---------------------------------------------------------------------------
+// Internal implementation
+// ---------------------------------------------------------------------------
+
+/// Run the flash operation and forward progress events to `output`.
+///
+/// Returns `Ok(())` when the script emits `STAGE:DONE`, or `Err(message)`
+/// on any failure (cancellation, script error, verification failure, …).
 async fn run_flash_operation(
     image_path: PathBuf,
     device_path: PathBuf,
@@ -78,353 +134,414 @@ async fn run_flash_operation(
 ) -> Result<(), String> {
     let image_path_str = image_path
         .to_str()
-        .ok_or_else(|| "Invalid image path".to_string())?;
+        .ok_or_else(|| "Invalid image path (non-UTF-8)".to_string())?;
 
     let device_path_str = device_path
         .to_str()
-        .ok_or_else(|| "Invalid device path".to_string())?;
+        .ok_or_else(|| "Invalid device path (non-UTF-8)".to_string())?;
 
-    // Get image size for progress calculation
+    // Verify the image file is readable before we even ask for privileges.
     let image_size = image_path
         .metadata()
-        .map_err(|e| format!("Cannot read image file: {}", e))?
+        .map_err(|e| format!("Cannot read image file: {e}"))?
         .len();
 
-    // Send initial message
+    if image_size == 0 {
+        return Err("Image file is empty".to_string());
+    }
+
+    // ── Locate the current executable ────────────────────────────────────────
+    // We re-launch ourselves with elevated privileges in `--flash-helper` mode.
+    // Using the running binary's path means no separate helper binary needs to
+    // be installed — distribution is a single file.
+    let self_exe = std::env::current_exe()
+        .map_err(|e| format!("Cannot determine current executable path: {e}"))?;
+
+    // ── Notify the UI ────────────────────────────────────────────────────────
     let _ = output
         .send(FlashProgress::Message(
-            "Preparing flash operation...".to_string(),
+            "Requesting elevated privileges…".to_string(),
         ))
         .await;
 
-    // Create the flash script
-    let script_content = format!(
-        r#"#!/bin/bash
-set -e
-
-IMAGE="{}"
-DEVICE="{}"
-
-echo "STATUS:Starting flash operation"
-
-# Unmount all partitions
-for part in "${{DEVICE}}"*[0-9] "${{DEVICE}}p"*[0-9]; do
-    if [ -e "$part" ]; then
-        if mountpoint -q "$part" 2>/dev/null || grep -qs "$part" /proc/mounts; then
-            echo "STATUS:Unmounting $part"
-            umount "$part" 2>/dev/null || true
-        fi
-    fi
-done
-
-# Get image size
-IMAGE_SIZE=$(stat -c%s "$IMAGE")
-echo "STATUS:Image size: $IMAGE_SIZE bytes"
-
-# Write the image using dd with progress
-echo "STATUS:Writing image to device..."
-dd if="$IMAGE" of="$DEVICE" bs=4M status=progress oflag=direct conv=fsync
-
-# Sync
-echo "STATUS:Syncing data to disk..."
-sync
-
-echo "STATUS:Flash operation completed!"
-"#,
-        image_path_str, device_path_str
-    );
-
-    let script_path = "/tmp/flashkraft_flash.sh";
-    std::fs::write(script_path, script_content)
-        .map_err(|e| format!("Failed to create flash script: {}", e))?;
-
-    // Make script executable
-    Command::new("chmod")
-        .arg("+x")
-        .arg(script_path)
-        .output()
-        .map_err(|e| format!("Failed to make script executable: {}", e))?;
-
-    // Send message about privilege request
-    let _ = output
-        .send(FlashProgress::Message(
-            "Requesting elevated privileges...".to_string(),
-        ))
-        .await;
-
-    // Execute with pkexec
+    // ── Spawn pkexec ─────────────────────────────────────────────────────────
+    // We re-execute this binary as root with the `--flash-helper` flag.
+    // The helper writes all output (including errors) to stdout, so we only
+    // need to capture stdout here.
     let mut child = Command::new("pkexec")
-        .arg("bash")
-        .arg(script_path)
+        .arg(&self_exe)
+        .arg("--flash-helper")
+        .arg(image_path_str)
+        .arg(device_path_str)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null()) // helper writes everything to stdout
         .spawn()
-        .map_err(|e| format!("Failed to execute pkexec: {}", e))?;
+        .map_err(|e| format!("Failed to spawn pkexec: {e}"))?;
 
-    let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
-    let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or("Failed to capture child stdout")?;
 
-    // Use async_std or tokio to handle the streams
-    // Since we're in an async context, we need to spawn tasks properly
-    let (progress_tx, mut progress_rx) = futures::channel::mpsc::channel::<(f32, u64, f32)>(100);
-    let (status_tx, mut status_rx) = futures::channel::mpsc::channel::<String>(100);
+    // ── Spawn a reader thread ─────────────────────────────────────────────────
+    // We read raw bytes off the child's stdout in a blocking thread and ship
+    // them to an async channel.  This decouples the blocking I/O from the
+    // async executor.
+    let (line_tx, mut line_rx) = futures::channel::mpsc::channel::<String>(512);
+    let cancel_clone = cancel_token.clone();
 
-    // Spawn stdout reader in a separate thread (for both status messages and dd progress)
-    let image_size_clone = image_size;
-    let progress_tx_clone = progress_tx.clone();
-    let cancel_token_clone1 = cancel_token.clone();
     std::thread::spawn(move || {
-        use std::io::Read;
-        let mut stdout_reader = BufReader::new(stdout);
-        let mut buffer = vec![0u8; 8192];
+        let mut buf = vec![0u8; 65536];
         let mut accumulated = String::new();
 
         loop {
-            // Check for cancellation to stop processing early
-            if cancel_token_clone1.load(Ordering::SeqCst) {
-                flash_debug!("stdout reader thread: cancellation detected, exiting");
+            if cancel_clone.load(Ordering::SeqCst) {
+                flash_debug!("reader thread: cancellation detected, stopping");
                 break;
             }
 
-            match stdout_reader.read(&mut buffer) {
+            match stdout.read(&mut buf) {
                 Ok(0) => {
-                    flash_debug!("stdout EOF reached");
+                    flash_debug!("reader thread: EOF");
                     break;
                 }
                 Ok(n) => {
-                    let chunk = String::from_utf8_lossy(&buffer[..n]);
+                    let chunk = String::from_utf8_lossy(&buf[..n]);
                     accumulated.push_str(&chunk);
-                    flash_debug!(
-                        "stdout chunk ({} bytes): {:?}",
-                        n,
-                        &chunk[..chunk.len().min(100)]
-                    );
 
-                    // Process STATUS: messages
-                    for line in accumulated.lines() {
-                        if line.starts_with("STATUS:") {
-                            let message = line.strip_prefix("STATUS:").unwrap_or(line).to_string();
-                            let _ = status_tx.clone().try_send(message);
-                        }
-                    }
+                    // Split on both \r and \n so we catch dd's in-place
+                    // carriage-return updates as well as regular newlines.
+                    loop {
+                        // Find the earliest \r or \n
+                        let cr = accumulated.find('\r');
+                        let nl = accumulated.find('\n');
 
-                    // Process dd progress updates (separated by \r)
-                    let parts: Vec<&str> = accumulated.split('\r').collect();
-                    if parts.len() > 1 {
-                        for part in &parts[..parts.len() - 1] {
-                            if !part.is_empty()
-                                && part.contains("bytes")
-                                && !part.starts_with("STATUS:")
-                            {
-                                flash_debug!("Found progress: {}", part);
-                                // Parse dd output: "123456789 bytes (123 MB, 117 MiB) copied..."
-                                let parts_vec: Vec<&str> = part.split_whitespace().collect();
+                        let split_at = match (cr, nl) {
+                            (Some(a), Some(b)) => Some(a.min(b)),
+                            (Some(a), None) => Some(a),
+                            (None, Some(b)) => Some(b),
+                            (None, None) => None,
+                        };
 
-                                if let Some(bytes_str) = parts_vec.first() {
-                                    if let Ok(bytes_written) = bytes_str.parse::<u64>() {
-                                        let progress = (bytes_written as f64
-                                            / image_size_clone as f64)
-                                            .min(1.0);
+                        match split_at {
+                            None => break,
+                            Some(pos) => {
+                                let line = accumulated[..pos].to_string();
+                                // Advance past the separator character
+                                accumulated = accumulated[pos + 1..].to_string();
 
-                                        // Parse speed (last token before the last, e.g., "4.0" from "4.0 MB/s")
-                                        let speed_mb_s = if parts_vec.len() >= 2 {
-                                            parts_vec[parts_vec.len() - 2]
-                                                .replace(',', ".")
-                                                .parse::<f32>()
-                                                .unwrap_or(0.0)
-                                        } else {
-                                            0.0
-                                        };
-
-                                        flash_debug!(
-                                            "Progress: {:.1}% ({} / {} bytes) @ {:.1} MB/s",
-                                            progress * 100.0,
-                                            bytes_written,
-                                            image_size_clone,
-                                            speed_mb_s
-                                        );
-                                        let _ = progress_tx_clone.clone().try_send((
-                                            progress as f32,
-                                            bytes_written,
-                                            speed_mb_s,
-                                        ));
+                                let trimmed = line.trim().to_string();
+                                if !trimmed.is_empty() {
+                                    if line_tx.clone().try_send(trimmed).is_err() {
+                                        // Receiver dropped — cancellation likely.
+                                        return;
                                     }
                                 }
                             }
                         }
-                        accumulated = parts[parts.len() - 1].to_string();
                     }
                 }
-                Err(_e) => {
-                    flash_debug!("stdout read error: {}", _e);
+                Err(e) => {
+                    flash_debug!("reader thread: read error: {e}");
                     break;
                 }
             }
         }
-        flash_debug!("stdout reader thread exiting");
-    });
 
-    // Spawn stderr reader in a separate thread (for dd progress)
-    let cancel_token_clone2 = cancel_token.clone();
-    std::thread::spawn(move || {
-        use std::io::Read;
-        let mut stderr_reader = BufReader::new(stderr);
-        let mut buffer = vec![0u8; 8192];
-        let mut accumulated = String::new();
-
-        loop {
-            // Check for cancellation to stop processing early
-            if cancel_token_clone2.load(Ordering::SeqCst) {
-                flash_debug!("stderr reader thread: cancellation detected, exiting");
-                break;
-            }
-
-            match stderr_reader.read(&mut buffer) {
-                Ok(0) => {
-                    flash_debug!("stderr EOF reached");
-                    break;
-                }
-                Ok(n) => {
-                    let chunk = String::from_utf8_lossy(&buffer[..n]);
-                    accumulated.push_str(&chunk);
-                    flash_debug!(
-                        "stderr chunk ({} bytes): {:?}",
-                        n,
-                        &chunk[..chunk.len().min(200)]
-                    );
-
-                    // Process dd progress updates (separated by \r - carriage return)
-                    let parts: Vec<&str> = accumulated.split('\r').collect();
-                    if parts.len() > 1 {
-                        for part in &parts[..parts.len() - 1] {
-                            if !part.is_empty() && part.contains("bytes") {
-                                flash_debug!("Found dd progress: {}", part);
-                                // Parse dd output: "123456789 bytes (123 MB, 117 MiB) copied..."
-                                let parts_vec: Vec<&str> = part.split_whitespace().collect();
-
-                                if let Some(bytes_str) = parts_vec.first() {
-                                    if let Ok(bytes_written) = bytes_str.parse::<u64>() {
-                                        let progress = (bytes_written as f64
-                                            / image_size_clone as f64)
-                                            .min(1.0);
-
-                                        // Parse speed (last token before the last, e.g., "4.0" from "4.0 MB/s")
-                                        let speed_mb_s = if parts_vec.len() >= 2 {
-                                            parts_vec[parts_vec.len() - 2]
-                                                .replace(',', ".")
-                                                .parse::<f32>()
-                                                .unwrap_or(0.0)
-                                        } else {
-                                            0.0
-                                        };
-
-                                        flash_debug!(
-                                            "Progress: {:.1}% ({} / {} bytes) @ {:.1} MB/s",
-                                            progress * 100.0,
-                                            bytes_written,
-                                            image_size_clone,
-                                            speed_mb_s
-                                        );
-                                        let _ = progress_tx.clone().try_send((
-                                            progress as f32,
-                                            bytes_written,
-                                            speed_mb_s,
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                        accumulated = parts[parts.len() - 1].to_string();
-                    }
-                }
-                Err(_e) => {
-                    flash_debug!("stderr read error: {}", _e);
-                    break;
-                }
-            }
+        // Flush any remainder that didn't end with a separator.
+        let remainder = accumulated.trim().to_string();
+        if !remainder.is_empty() {
+            let _ = line_tx.clone().try_send(remainder);
         }
-        flash_debug!("stderr reader thread exiting");
+
+        flash_debug!("reader thread: exiting");
     });
 
-    // Forward progress and status updates to the output channel
-    let mut last_progress = 0.0_f32;
+    // ── Main async event loop ─────────────────────────────────────────────────
+    let mut last_progress: f32 = 0.0;
+    // `image_size` is known upfront from the file metadata; the script also
+    // emits `SIZE:<n>` which we use as a cross-check.
+    let mut total_size: u64 = image_size;
+
     loop {
-        // Check for cancellation request FIRST before processing any updates
+        // Check cancellation first.
         if cancel_token.load(Ordering::SeqCst) {
-            flash_debug!("Cancellation requested, killing child process");
-            // Kill the child process
+            flash_debug!("cancellation requested — killing child");
             let _ = child.kill();
-            // Clean up script
-            let _ = std::fs::remove_file(script_path);
             return Err("Flash operation cancelled by user".to_string());
         }
 
-        // Check if child process has exited first
+        // Check if child has already exited.
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => {
+                flash_debug!("child exited: {status:?}");
+                // Drain any remaining lines from the reader thread before
+                // evaluating the outcome.
+                drain_remaining(&mut line_rx, &mut output, &mut last_progress, total_size).await;
+
+                if status.success() {
+                    return Ok(());
+                } else {
+                    return Err(format!(
+                        "Flash helper exited with code {:?}",
+                        status.code().unwrap_or(-1)
+                    ));
+                }
+            }
             Ok(None) => {
-                // Process still running, check for updates
+                // Still running — process pending lines below.
             }
             Err(e) => {
-                return Err(format!("Error checking process status: {}", e));
+                return Err(format!("Error polling child process: {e}"));
             }
         }
 
-        // Try to get progress update (non-blocking)
-        if let Ok(Some((p, bytes, speed))) = progress_rx.try_next() {
-            // Check cancellation again before sending to UI
+        // Process all lines currently available in the channel (non-blocking).
+        while let Ok(line) = line_rx.try_recv() {
             if cancel_token.load(Ordering::SeqCst) {
-                flash_debug!("Cancellation detected, discarding progress update");
-                continue;
+                break;
             }
 
-            flash_debug!(
-                "Received progress from channel: {:.1}% @ {:.1} MB/s",
-                p * 100.0,
-                speed
-            );
-            // Only send if progress changed significantly (avoid flooding)
-            if (p - last_progress).abs() > 0.01 || p >= 1.0 {
-                flash_debug!("Sending progress to UI: {:.1}%", p * 100.0);
-                let _ = output.send(FlashProgress::Progress(p, bytes, speed)).await;
-                last_progress = p;
-            } else {
-                flash_debug!(
-                    "Skipping progress update (too small change): {:.1}% (last: {:.1}%)",
-                    p * 100.0,
-                    last_progress * 100.0
-                );
+            flash_debug!("line: {line:?}");
+
+            match parse_script_line(&line) {
+                // ── Stage transitions ────────────────────────────────────────
+                ScriptLine::Stage(stage) => {
+                    let msg = stage.to_string();
+                    flash_debug!("stage → {msg}");
+                    let _ = output.send(FlashProgress::Message(msg)).await;
+
+                    if stage == FlashStage::Done {
+                        // Helper finished successfully.
+                        let _ = child.wait(); // reap
+                        return Ok(());
+                    }
+                }
+
+                // ── Total size (for progress ratio) ──────────────────────────
+                ScriptLine::Size(n) => {
+                    flash_debug!("total size from helper: {n}");
+                    if n > 0 {
+                        total_size = n;
+                    }
+                }
+
+                // ── Pure-Rust helper progress line ───────────────────────────
+                // Format: PROGRESS:<bytes_written>:<speed_mb_s>
+                ScriptLine::Progress(bytes_written, speed_mb_s) => {
+                    if total_size == 0 {
+                        continue;
+                    }
+                    let progress =
+                        (bytes_written as f64 / total_size as f64).clamp(0.0, 1.0) as f32;
+
+                    flash_debug!(
+                        "progress: {:.1}% ({bytes_written}/{total_size}) @ {speed_mb_s:.1} MB/s",
+                        progress * 100.0
+                    );
+
+                    // Throttle: only forward if progress moved by ≥ 0.5 %
+                    if (progress - last_progress).abs() >= 0.005 || progress >= 1.0 {
+                        let _ = output
+                            .send(FlashProgress::Progress(progress, bytes_written, speed_mb_s))
+                            .await;
+                        last_progress = progress;
+                    }
+                }
+
+                // ── Legacy dd progress line (kept for compat) ────────────────
+                ScriptLine::DdProgress(bytes_written, speed_mb_s) => {
+                    if total_size == 0 {
+                        continue;
+                    }
+                    let progress =
+                        (bytes_written as f64 / total_size as f64).clamp(0.0, 1.0) as f32;
+
+                    if (progress - last_progress).abs() >= 0.005 || progress >= 1.0 {
+                        let _ = output
+                            .send(FlashProgress::Progress(progress, bytes_written, speed_mb_s))
+                            .await;
+                        last_progress = progress;
+                    }
+                }
+
+                // ── Legacy dd exit code ──────────────────────────────────────
+                ScriptLine::DdExit(0) => {
+                    flash_debug!("dd exited successfully (legacy)");
+                    if last_progress < 1.0 {
+                        let _ = output
+                            .send(FlashProgress::Progress(1.0, total_size, 0.0))
+                            .await;
+                        last_progress = 1.0;
+                    }
+                }
+                ScriptLine::DdExit(code) => {
+                    flash_debug!("dd exited with non-zero code {code} (legacy)");
+                    let _ = output
+                        .send(FlashProgress::Message(format!(
+                            "dd exited with code {code}"
+                        )))
+                        .await;
+                }
+
+                // ── Helper-level error ───────────────────────────────────────
+                ScriptLine::Error(msg) => {
+                    flash_debug!("helper error: {msg}");
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(msg);
+                }
+
+                // ── Informational log ────────────────────────────────────────
+                ScriptLine::Log(msg) => {
+                    flash_debug!("log: {msg}");
+                    let _ = output.send(FlashProgress::Message(msg)).await;
+                }
+
+                // ── Unknown / unrecognised output ────────────────────────────
+                ScriptLine::Unknown(raw) => {
+                    flash_debug!("unknown line: {raw:?}");
+                    // Silently ignore noise from pkexec / the system.
+                }
             }
         }
 
-        // Try to get status update (non-blocking)
-        if let Ok(Some(msg)) = status_rx.try_next() {
-            // Check cancellation again before sending to UI
-            if cancel_token.load(Ordering::SeqCst) {
-                flash_debug!("Cancellation detected, discarding status update");
-                continue;
-            }
-            let _ = output.send(FlashProgress::Message(msg)).await;
-        }
-
-        // Small delay to avoid busy-waiting
+        // Yield for ~100 ms to avoid a busy-wait loop.
         futures_timer::Delay::new(std::time::Duration::from_millis(100)).await;
     }
+}
 
-    // Wait for process completion
-    let status = child
-        .wait()
-        .map_err(|e| format!("Failed to wait for process: {}", e))?;
+/// Drain any remaining lines from the reader after the child exits.
+async fn drain_remaining(
+    line_rx: &mut futures::channel::mpsc::Receiver<String>,
+    output: &mut futures::channel::mpsc::Sender<FlashProgress>,
+    last_progress: &mut f32,
+    total_size: u64,
+) {
+    while let Ok(line) = line_rx.try_recv() {
+        flash_debug!("drain: {line:?}");
+        match parse_script_line(&line) {
+            ScriptLine::Stage(FlashStage::Done) => {
+                let _ = output
+                    .send(FlashProgress::Message("Flash complete!".to_string()))
+                    .await;
+            }
+            ScriptLine::Stage(stage) => {
+                let _ = output.send(FlashProgress::Message(stage.to_string())).await;
+            }
+            ScriptLine::Error(msg) => {
+                let _ = output.send(FlashProgress::Failed(msg)).await;
+            }
+            ScriptLine::Log(msg) => {
+                let _ = output.send(FlashProgress::Message(msg)).await;
+            }
+            // Pure-Rust helper structured progress
+            ScriptLine::Progress(bytes_written, speed_mb_s) => {
+                if total_size > 0 {
+                    let progress =
+                        (bytes_written as f64 / total_size as f64).clamp(0.0, 1.0) as f32;
+                    if (progress - *last_progress).abs() >= 0.005 || progress >= 1.0 {
+                        let _ = output
+                            .send(FlashProgress::Progress(progress, bytes_written, speed_mb_s))
+                            .await;
+                        *last_progress = progress;
+                    }
+                }
+            }
+            // Legacy dd progress
+            ScriptLine::DdProgress(bytes_written, speed_mb_s) => {
+                if total_size > 0 {
+                    let progress =
+                        (bytes_written as f64 / total_size as f64).clamp(0.0, 1.0) as f32;
+                    if (progress - *last_progress).abs() >= 0.005 || progress >= 1.0 {
+                        let _ = output
+                            .send(FlashProgress::Progress(progress, bytes_written, speed_mb_s))
+                            .await;
+                        *last_progress = progress;
+                    }
+                }
+            }
+            ScriptLine::DdExit(0) => {
+                if *last_progress < 1.0 {
+                    let _ = output
+                        .send(FlashProgress::Progress(1.0, total_size, 0.0))
+                        .await;
+                    *last_progress = 1.0;
+                }
+            }
+            ScriptLine::Size(n) => {
+                flash_debug!("drain: size = {n}");
+            }
+            ScriptLine::DdExit(code) => {
+                flash_debug!("drain: dd exit code {code}");
+            }
+            ScriptLine::Unknown(_) => {}
+        }
+    }
+}
 
-    // Clean up script
-    let _ = std::fs::remove_file(script_path);
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
-    if !status.success() {
-        return Err(format!(
-            "Flash operation failed with exit code: {:?}",
-            status.code()
-        ));
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Verify that `FlashProgress` variants are `Clone` (required by Iced).
+    #[test]
+    fn test_flash_progress_clone() {
+        let p = FlashProgress::Progress(0.5, 512, 10.0);
+        let _cloned = p.clone();
+
+        let m = FlashProgress::Message("hello".to_string());
+        let _cloned = m.clone();
+
+        let c = FlashProgress::Completed;
+        let _cloned = c.clone();
+
+        let f = FlashProgress::Failed("oops".to_string());
+        let _cloned = f.clone();
     }
 
-    Ok(())
+    #[test]
+    fn test_flash_progress_debug() {
+        let p = FlashProgress::Progress(0.75, 805_306_368, 25.5);
+        let s = format!("{p:?}");
+        assert!(s.contains("Progress"));
+        assert!(s.contains("0.75"));
+    }
+
+    /// Ensure the hash-based subscription ID is stable for the same paths.
+    #[test]
+    fn test_subscription_id_is_deterministic() {
+        fn compute_id(img: &str, dev: &str) -> u64 {
+            let mut h = DefaultHasher::new();
+            PathBuf::from(img).hash(&mut h);
+            PathBuf::from(dev).hash(&mut h);
+            h.finish()
+        }
+
+        let id1 = compute_id("/tmp/a.iso", "/dev/sdb");
+        let id2 = compute_id("/tmp/a.iso", "/dev/sdb");
+        let id3 = compute_id("/tmp/b.iso", "/dev/sdb");
+
+        assert_eq!(id1, id2, "same inputs → same ID");
+        assert_ne!(id1, id3, "different image → different ID");
+    }
+
+    /// Ensure different device paths produce different subscription IDs.
+    #[test]
+    fn test_subscription_id_differs_for_different_devices() {
+        fn compute_id(img: &str, dev: &str) -> u64 {
+            let mut h = DefaultHasher::new();
+            PathBuf::from(img).hash(&mut h);
+            PathBuf::from(dev).hash(&mut h);
+            h.finish()
+        }
+
+        let id_sdb = compute_id("/tmp/a.iso", "/dev/sdb");
+        let id_sdc = compute_id("/tmp/a.iso", "/dev/sdc");
+        assert_ne!(id_sdb, id_sdc);
+    }
 }

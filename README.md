@@ -6,152 +6,145 @@
 [![Release](https://github.com/sorinirimies/flashkraft/actions/workflows/release.yml/badge.svg)](https://github.com/sorinirimies/flashkraft/actions/workflows/release.yml)
 [![CI](https://github.com/sorinirimies/flashkraft/actions/workflows/ci.yml/badge.svg)](https://github.com/sorinirimies/flashkraft/actions/workflows/ci.yml)
 
-A lightning fast, lightweight app size and memory footprint, no Electron bloat, OS Imager application built with Rust and the [Iced](https://github.com/iced-rs/iced) GUI framework.
+A lightning-fast, lightweight OS image writer built entirely in Rust with the [Iced](https://github.com/iced-rs/iced) GUI framework. No Electron, no shell scripts, no external tooling — pure Rust from UI to block device.
+
 ## Preview
+
 ![flashkraft_demo](https://github.com/user-attachments/assets/76549cb3-a65e-4a99-b638-1aac6d50c553)
 
 ## Features
 
-- 🎨 Small app size, extremely low memory footprint, Rust compiled code has C like and even better speed, no Electron runtime bloat needed, unlike Balena-Etcher needs to, [see Balena Etcher Electron bloat discussions](https://forums.balena.io/t/why-is-etcher-so-bloated/368873)
-- 🎨 21 beautiful Iced themes to choose from
-- 📁 Support for multiple image formats (ISO, IMG, DMG, ZIP, etc.)
-- 💾 Automatic detection of removable drives
-- ⚡ Fast and efficient flashing (simulated in current version)
-- 🔒 Safe drive selection to prevent accidental data loss
-- 🎯 Progress tracking during flash operations
+- ⚡ **Pure-Rust flash engine** — no `dd`, no bash scripts; writes directly to the block device using `std::fs`, `nix` ioctls, and `sha2` verification
+- 🔒 **Write verification** — SHA-256 of the source image is compared against a read-back of the device after every flash
+- 🔄 **Partition table refresh** — `BLKRRPART` ioctl ensures the kernel picks up the new partition layout immediately, so the USB boots first time
+- 🧲 **Lazy unmount** — all partitions are cleanly detached via `umount2(MNT_DETACH)` before writing
+- 🎨 **21 beautiful Iced themes** to choose from, persisted across sessions
+- 📁 **Multiple image formats** — ISO, IMG, DMG, ZIP, and more
+- 💾 **Automatic drive detection** — removable drives refreshed on demand
+- 🛡️ **Safe drive selection** — system drives flagged, oversized drives warned, read-only drives blocked
+- 🎯 **Real-time progress** — stage-aware progress bar with live MB/s speed display
+- 🪶 **Tiny footprint** — Rust-compiled binary, C-like memory usage, no Electron runtime
 
-### Code Examples
+## How flashing works
 
-Working Rust examples demonstrating FlashKraft's architecture and patterns:
+FlashKraft uses a **self-elevating pure-Rust helper** pattern. When you click Flash:
 
-```bash
-cargo run --example basic_usage       # Full FlashKraft application
-cargo run --example custom_theme      # Theme system showcase
+```
+Main process (GUI)
+  └─ pkexec /path/to/flashkraft --flash-helper <image> <device>
+       └─ Runs as root, pure Rust, no shell
+            1. UNMOUNTING  — reads /proc/mounts, calls umount2(MNT_DETACH) per partition
+            2. WRITING     — streams image → block device in 4 MiB chunks, emits PROGRESS lines
+            3. SYNCING     — fsync(fd) + sync() to flush all kernel write-back caches
+            4. REREADING   — BLKRRPART ioctl so the kernel sees the new partition table
+            5. VERIFYING   — SHA-256(image) == SHA-256(device[0..image_size])
+            6. DONE        — GUI shows success
 ```
 
-See [examples/README.md](examples/README.md) for more details.
+The same binary is re-executed with elevated privileges via `pkexec` — no separate helper binary needs to be installed. All output (progress, logs, errors) is written to stdout as structured lines that the GUI reads in real time.
+
+### Why not `dd`?
+
+| | `dd` approach | FlashKraft |
+|---|---|---|
+| Shell dependency | ✗ requires bash, coreutils | ✓ pure Rust |
+| Progress format | `\r`-terminated, locale-dependent | ✓ structured `PROGRESS:bytes:speed` |
+| Speed unit handling | ✗ kB/s / MB/s / GB/s mixed | ✓ always normalised to MB/s |
+| Write verification | ✗ none | ✓ SHA-256 read-back |
+| Partition table refresh | ✗ not done | ✓ `BLKRRPART` ioctl |
+| Error reporting | ✗ exit code only | ✓ `ERROR:<message>` on every failure path |
+
+### Why not `nusb` or `usbd_bulk_only_transport`?
+
+USB flash drives are **USB Mass Storage Class** devices. The kernel's `usb-storage` driver speaks the BOT + SCSI protocol to them and exposes the result as a plain block device (`/dev/sdX`). Writing an OS image needs the **block device interface**, not USB protocol programming.
+
+- `nusb` — USB protocol library (user-space driver for *non-standard* USB devices; MSC is explicitly out of scope per its own docs)
+- `usbd_bulk_only_transport` — embedded device-side firmware crate (runs *on* the USB device, not the host)
 
 ## The Elm Architecture
 
-FlashKraft is built using **The Elm Architecture (TEA)**, which Iced embraces as the natural approach for building interactive applications. This architecture provides a simple, scalable pattern for managing application state and side effects.
+FlashKraft is built using **The Elm Architecture (TEA)**, which Iced embraces as its natural pattern for interactive applications.
 
 ### Core Concepts
 
-The Elm Architecture consists of four main components:
-
-#### 1. **Model (State)**
-
-The Model represents the complete state of the application at any given moment:
+#### 1. Model (State)
 
 ```rust
 struct FlashKraft {
-    selected_image: Option<ImageInfo>,      // Currently selected image file
-    selected_target: Option<DriveInfo>,     // Currently selected target drive
-    available_drives: Vec<DriveInfo>,       // List of detected drives
-    flash_progress: Option<f32>,            // Flash progress (0.0 to 1.0)
-    error_message: Option<String>,          // Error message if any
+    selected_image: Option<ImageInfo>,   // Currently selected image file
+    selected_target: Option<DriveInfo>,  // Currently selected target drive
+    available_drives: Vec<DriveInfo>,    // Detected drives
+    flash_progress: Option<f32>,         // Progress 0.0–1.0
+    flash_bytes_written: u64,            // Bytes written so far
+    flash_speed_mb_s: f32,              // Current transfer speed
+    error_message: Option<String>,       // Error message if any
+    flashing_active: bool,              // Subscription guard
+    flash_cancel_token: Arc<AtomicBool>, // Cancellation signal
 }
 ```
 
-The state is immutable and only changes through the `update` function. This makes the application predictable and easy to reason about.
+State is immutable between `update` calls — all changes flow through messages.
 
-#### 2. **Message**
-
-Messages represent all possible events that can occur in the application:
+#### 2. Messages
 
 ```rust
 enum Message {
     // User interactions
     SelectImageClicked,
-    RefreshDrivesClicked,
     TargetDriveClicked(DriveInfo),
     FlashClicked,
+    CancelFlash,
     ResetClicked,
-    CancelClicked,
 
     // Async results
     ImageSelected(Option<PathBuf>),
     DrivesRefreshed(Vec<DriveInfo>),
-    FlashProgress(f32),
+    FlashProgressUpdate(f32, u64, f32),
     FlashCompleted(Result<(), String>),
+    ThemeChanged(Theme),
 }
 ```
 
-Messages are the only way to trigger state changes. They can come from:
-- User interactions (button clicks, etc.)
-- Async operations (file selection, drive detection)
-- Timers or subscriptions
-
-#### 3. **Update Logic**
-
-The `update` function is the heart of the application. It's a pure function that:
-- Takes the current state and a message
-- Returns a new state and optionally a `Command` for side effects
+#### 3. Update Logic
 
 ```rust
-fn update(&mut self, message: Message) -> Command<Message> {
+fn update(&mut self, message: Message) -> Task<Message> {
     match message {
-        Message::SelectImageClicked => {
-            // Trigger async file selection
-            Command::perform(select_image_file(), Message::ImageSelected)
+        Message::FlashClicked => {
+            // Reset cancel token, activate subscription
+            state.flash_cancel_token = Arc::new(AtomicBool::new(false));
+            state.flashing_active = true;
+            Task::none()
         }
-        Message::ImageSelected(maybe_path) => {
-            // Update state with selected image
-            self.selected_image = maybe_path.map(ImageInfo::from_path);
-            Command::none()
+        Message::FlashProgressUpdate(progress, bytes, speed) => {
+            state.flash_progress = Some(progress);
+            state.flash_bytes_written = bytes;
+            state.flash_speed_mb_s = speed;
+            Task::none()
         }
-        // ... handle other messages
+        // ...
     }
 }
 ```
 
-This separation ensures:
-- State transitions are predictable
-- Side effects are explicit
-- Logic is easy to test
+#### 4. View Logic
 
-#### 4. **View Logic**
+Pure function from state to UI — no side effects, no mutation.
 
-The `view` function is a pure function that:
-- Takes the current state
-- Returns a description of the UI
+#### 5. Subscriptions
 
-```rust
-fn view(&self) -> Element<'_, Message> {
-    if let Some(progress) = self.flash_progress {
-        view_flashing(progress)
-    } else if let Some(error) = &self.error_message {
-        view_error(error)
-    } else {
-        view_main(self)
-    }
-}
-```
-
-The view is declarative - you describe *what* the UI should look like based on state, not *how* to update it.
-
-### Benefits of The Elm Architecture
-
-1. **Predictability**: State flows in one direction, making behavior easy to predict
-2. **Testability**: Pure functions are easy to unit test
-3. **Debuggability**: All state changes go through `update`, making it easy to log and debug
-4. **Maintainability**: Clear separation of concerns makes code easy to understand and modify
-5. **Type Safety**: Rust's type system ensures correctness at compile time
+When `flashing_active` is true, a subscription spawns the privileged helper and streams [`FlashProgress`] events back to `update`.
 
 ### Data Flow
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                                                         │
-│  User Interaction  →  Message  →  Update  →  State      │
-│                                      ↓                  │
-│                                   Command               │
-│                                      ↓                  │
-│  Async Result  →  Message  →  Update  →  State          │
-│                                                         │
-│                    State  →  View  →  UI                │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
+User Action → Message → Update → State
+                            ↓
+                         Task/Subscription
+                            ↓
+                    Async Result → Message → Update → State
+                                                ↓
+                                             View → UI
 ```
 
 ## Building and Running
@@ -159,67 +152,76 @@ The view is declarative - you describe *what* the UI should look like based on s
 ### Prerequisites
 
 - Rust 1.70 or later
-- Cargo (comes with Rust)
+- `pkexec` (part of `polkit`, available on all major Linux distributions)
 
 ### Build
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/flashkraft.git
+git clone https://github.com/sorinirimies/flashkraft.git
 cd flashkraft
 
-# Build the project
 cargo build --release
-
-# Run the application
 cargo run --release
 ```
 
 ### Development
 
 ```bash
-# Run in debug mode (faster compilation, slower runtime)
+# Debug build (faster compilation)
 cargo run
 
-# Check code without building
+# Run tests
+cargo test
+
+# Check without building
 cargo check
 
-# Run with backtrace on errors
+# With backtraces
 RUST_BACKTRACE=1 cargo run
+```
+
+### Examples
+
+```bash
+cargo run --example basic_usage   # Full application
+cargo run --example custom_theme  # Theme showcase
 ```
 
 ## Usage
 
-1. **Select Image**: Click the "+" button to select an OS image file (ISO, IMG, DMG, etc.)
-2. **Select Target**: Choose a target drive from the list of detected drives
-3. **Flash**: Click the "Flash!" button to start writing the image to the drive
-4. **Wait**: Monitor the progress bar until completion
-5. **Done**: Safely remove the drive when prompted
+1. **Select Image** — click the `+` button and choose an ISO, IMG, or DMG file
+2. **Select Drive** — pick the target USB or SD card from the detected drives list
+3. **Flash** — click **Flash!**; authenticate with `pkexec` when prompted
+4. **Wait** — the progress bar shows live stage, bytes written, and MB/s
+5. **Done** — verification passes automatically; safely remove the drive
 
 ## Project Structure
 
 ```
 flashkraft/
 ├── src/
-│   ├── main.rs                  # Application entry point
-│   ├── view.rs                  # View orchestration
-│   ├── core/                    # Core application logic (Elm Architecture)
+│   ├── main.rs                       # Entry point; detects --flash-helper mode
+│   ├── lib.rs                        # Library root
+│   ├── view.rs                       # View orchestration
+│   ├── core/                         # Core application logic (Elm Architecture)
 │   │   ├── mod.rs
-│   │   ├── state.rs             # Application state (Model)
-│   │   ├── message.rs           # Message definitions
-│   │   ├── update.rs            # Update logic
-│   │   ├── storage.rs           # Persistent storage
-│   │   ├── flash_subscription.rs # Flash operation monitoring
-│   │   └── commands/            # Async commands (side effects)
+│   │   ├── state.rs                  # Application state (Model) + Elm methods
+│   │   ├── message.rs                # All message variants
+│   │   ├── update.rs                 # State transition logic
+│   │   ├── storage.rs                # Persistent theme storage (sled)
+│   │   ├── flash_helper.rs           # ★ Pure-Rust privileged flash engine
+│   │   ├── flash_writer.rs           # ★ Protocol types, line parser, speed normaliser
+│   │   ├── flash_subscription.rs     # ★ Iced Subscription — spawns helper, streams events
+│   │   └── commands/
 │   │       ├── mod.rs
-│   │       ├── file_selection.rs
-│   │       └── drive_detection.rs
-│   ├── domain/                  # Domain models (business entities)
+│   │       ├── file_selection.rs     # Async native file dialog (rfd)
+│   │       └── drive_detection.rs    # Async drive enumeration (/sys/block)
+│   ├── domain/                       # Domain models
 │   │   ├── mod.rs
+│   │   ├── constraints.rs            # Drive/image compatibility checks
 │   │   ├── drive_info.rs
 │   │   └── image_info.rs
-│   ├── components/              # UI components
-│   │   ├── mod.rs
+│   ├── components/                   # UI components
 │   │   ├── animated_progress.rs
 │   │   ├── device_selector.rs
 │   │   ├── header.rs
@@ -228,59 +230,67 @@ flashkraft/
 │   │   ├── status_views.rs
 │   │   ├── step_indicators.rs
 │   │   └── theme_selector.rs
-│   └── utils/                   # Utility modules
-│       ├── mod.rs
+│   └── utils/
 │       ├── icons_bootstrap_mapper.rs
-│       └── logger.rs
-├── .github/
-│   └── workflows/
-│       ├── ci.yml               # Continuous Integration
-│       └── release.yml          # Release automation
-├── Cargo.toml                   # Rust dependencies and project metadata
-├── README.md                    # This file
-└── LICENSE                      # MIT License
+│       └── logger.rs                 # debug_log!, flash_debug!, status_log! macros
+├── examples/
+├── .github/workflows/
+│   ├── ci.yml
+│   └── release.yml
+├── Cargo.toml
+├── CHANGELOG.md
+└── LICENSE
 ```
+
+Items marked ★ form the flash pipeline and are described in detail above.
 
 ## Dependencies
 
-- **iced** (0.13): Cross-platform GUI framework
-- **iced_fonts**: Bootstrap icons for the UI
-- **rfd**: Native file dialog for file selection
-- **sysinfo**: System information for drive detection
-- **sled**: Embedded database for theme persistence
-- **futures**: Async utilities for subscriptions
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| `iced` | 0.13 | Cross-platform GUI framework (Elm Architecture) |
+| `iced_fonts` | 0.1 | Bootstrap icon font |
+| `rfd` | 0.15 | Native file/folder dialogs |
+| `sysinfo` | 0.30 | Drive enumeration |
+| `nix` | 0.29 | `umount2`, `BLKRRPART` ioctl, `fsync` |
+| `sha2` | 0.10 | SHA-256 write verification |
+| `futures` | 0.3 | Async channel primitives for the subscription |
+| `futures-timer` | 3.0 | Non-blocking delay in the subscription poll loop |
+| `sled` | 0.34 | Embedded key-value store for theme persistence |
+| `dirs` | 5.0 | XDG data directory resolution |
 
 ## Architecture Highlights
 
-- **26 modules**: Well-organized codebase
-- **4 layers**: Domain, Core, Components, View
-- **22 tests**: 100% passing
-- **0 warnings**: Clean clippy and rustfmt
-- **Elm Architecture**: Pure functional state management
-- **Type-safe**: Leveraging Rust's type system
+- **Pure-Rust flash engine** — zero shell scripts or external binaries
+- **94 unit tests** — all passing; covers parsing, pipeline validation, I/O round-trips, SHA-256 hashing, partition name detection, and protocol simulation
+- **5-stage verified pipeline** — Unmount → Write → Sync → BLKRRPART → SHA-256 verify
+- **Self-elevating helper** — single binary, no install-time setup beyond `polkit`
+- **Elm Architecture** — unidirectional data flow, pure update/view functions
+- **0 warnings** — clean `cargo build` and `cargo test`
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. When contributing, please:
+Contributions are welcome! Please:
 
-1. Follow the Elm Architecture pattern
+1. Follow the Elm Architecture pattern — all state changes via `update`
 2. Keep functions pure where possible
-3. Use meaningful message names
-4. Add comments for complex logic
-5. Test your changes
+3. Add unit tests for any new logic, especially in `flash_helper.rs` and `flash_writer.rs`
+4. Run `cargo test` and `cargo clippy` before opening a PR
 
 ## Learning Resources
 
 - [Iced Documentation](https://docs.rs/iced/)
 - [The Elm Architecture Guide](https://guide.elm-lang.org/architecture/)
 - [Iced Examples](https://github.com/iced-rs/iced/tree/master/examples)
-- [Rust Book](https://doc.rust-lang.org/book/)
+- [The Rust Book](https://doc.rust-lang.org/book/)
+- [nix crate](https://docs.rs/nix/) — POSIX ioctls and syscalls from Rust
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
 - Built with [Iced](https://github.com/iced-rs/iced)
 - Follows [The Elm Architecture](https://guide.elm-lang.org/architecture/)
+- Flash pipeline design inspired by [Balena Etcher](https://github.com/balena-io/etcher)
