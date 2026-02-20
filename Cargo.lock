@@ -1318,8 +1318,10 @@ version = "0.4.2"
 dependencies = [
  "anyhow",
  "crossterm",
+ "dirs 5.0.1",
  "flashkraft-core",
  "ratatui",
+ "tempfile",
  "tokio",
  "tui-checkbox",
  "tui-piechart",

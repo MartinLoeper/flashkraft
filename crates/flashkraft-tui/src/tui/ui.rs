@@ -26,6 +26,7 @@ use tui_piechart::{LegendLayout, LegendPosition, PieChart, PieSlice};
 use tui_slider::{Slider, SliderOrientation, SliderState};
 
 use super::app::{App, AppScreen, InputMode, UsbEntry};
+use crate::file_explorer;
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     match app.screen {
         AppScreen::SelectImage => render_select_image(app, frame, area),
+        AppScreen::BrowseImage => render_browse_image(app, frame, area),
         AppScreen::SelectDrive => render_select_drive(app, frame, area),
         AppScreen::DriveInfo => render_drive_info(app, frame, area),
         AppScreen::ConfirmFlash => render_confirm_flash(app, frame, area),
@@ -171,6 +173,26 @@ fn chrome_layout(area: Rect) -> [Rect; 4] {
 
 // ── Screen: SelectImage ───────────────────────────────────────────────────────
 
+fn render_browse_image(app: &mut App, frame: &mut Frame, area: Rect) {
+    let [hdr, bc, body, ftr] = chrome_layout(area);
+
+    render_header(frame, hdr, "OS Image Writer");
+    render_breadcrumbs(frame, bc, 1);
+    render_footer(
+        frame,
+        ftr,
+        &[
+            ("↑/↓ or j/k", "Navigate"),
+            ("Enter", "Select / Open"),
+            ("← or Backspace", "Go up"),
+            ("Tab", "Back to input"),
+            ("Esc", "Dismiss"),
+        ],
+    );
+
+    file_explorer::render(&mut app.file_explorer, frame, body);
+}
+
 fn render_select_image(app: &mut App, frame: &mut Frame, area: Rect) {
     let [hdr, bc, body, ftr] = chrome_layout(area);
 
@@ -181,6 +203,7 @@ fn render_select_image(app: &mut App, frame: &mut Frame, area: Rect) {
         ftr,
         &[
             ("Enter", "Confirm path"),
+            ("Tab", "Browse files"),
             ("←/→", "Move cursor"),
             ("Ctrl-C", "Quit"),
         ],
@@ -190,7 +213,7 @@ fn render_select_image(app: &mut App, frame: &mut Frame, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(0),
-            Constraint::Length(7),
+            Constraint::Length(9),
             Constraint::Length(3),
             Constraint::Min(0),
         ])
@@ -216,6 +239,20 @@ fn render_select_image(app: &mut App, frame: &mut Frame, area: Rect) {
                 "/home/user/Downloads/ubuntu-24.04-desktop-amd64.iso",
                 Style::default().fg(Color::Rgb(160, 160, 170)),
             ),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Press ", Style::default().fg(C_DIM)),
+            Span::styled(
+                "Tab",
+                Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" to open the interactive ", Style::default().fg(C_DIM)),
+            Span::styled(
+                "file browser",
+                Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" instead.", Style::default().fg(C_DIM)),
         ]),
     ])
     .alignment(Alignment::Center)

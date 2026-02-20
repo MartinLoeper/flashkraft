@@ -37,8 +37,37 @@ pub use flashkraft_core::domain;
 /// Ratatui front-end — app state, event handling, flash runner, UI rendering.
 pub mod tui;
 
+/// Self-contained file-explorer widget for Ratatui.
+///
+/// This module has **no flashkraft-specific dependencies** — only `ratatui`,
+/// `crossterm`, and the standard library — so it can be extracted and
+/// published as a stand-alone crate without modification.
+///
+/// ## Quick start
+///
+/// ```ignore
+/// use flashkraft_tui::file_explorer::{FileExplorer, ExplorerOutcome};
+///
+/// let mut explorer = FileExplorer::new(
+///     std::env::home_dir().unwrap_or_default(),
+///     vec!["iso".into(), "img".into()],
+/// );
+///
+/// // In your render function:
+/// flashkraft_tui::file_explorer::render(&mut explorer, frame, area);
+///
+/// // In your key handler:
+/// match explorer.handle_key(key) {
+///     ExplorerOutcome::Selected(path) => { /* use path */ }
+///     ExplorerOutcome::Dismissed      => { /* close explorer */ }
+///     _                               => {}
+/// }
+/// ```
+pub mod file_explorer;
+
 // ── Convenience re-exports for examples and tests ────────────────────────────
 
+pub use file_explorer::{ExplorerOutcome, FileExplorer, FsEntry};
 pub use tui::app::{App, AppScreen, FlashEvent, InputMode, UsbEntry};
 pub use tui::events::handle_key;
 pub use tui::ui::render;

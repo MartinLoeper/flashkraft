@@ -12,6 +12,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::app::{App, AppScreen, InputMode};
+use crate::file_explorer::ExplorerOutcome;
 
 /// Process a single key event and mutate `app` accordingly.
 ///
@@ -38,6 +39,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
     // ── Screen-specific handling ─────────────────────────────────────────────
     match app.screen {
         AppScreen::SelectImage => handle_select_image(app, key),
+        AppScreen::BrowseImage => handle_browse_image(app, key),
         AppScreen::SelectDrive => handle_select_drive(app, key),
         AppScreen::DriveInfo => handle_drive_info(app, key),
         AppScreen::ConfirmFlash => handle_confirm_flash(app, key),
@@ -54,6 +56,16 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
 fn handle_select_image(app: &mut App, key: KeyEvent) -> bool {
     match app.input_mode {
         InputMode::Editing => match key.code {
+            // Open the interactive file browser.
+            KeyCode::Tab => {
+                app.open_file_explorer();
+                true
+            }
+            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.open_file_explorer();
+                true
+            }
+
             // Confirm path.
             KeyCode::Enter => {
                 match app.confirm_image() {
@@ -116,12 +128,38 @@ fn handle_select_image(app: &mut App, key: KeyEvent) -> bool {
                 app.input_mode = InputMode::Editing;
                 true
             }
+            // Open the interactive file browser from normal mode too.
+            KeyCode::Tab => {
+                app.open_file_explorer();
+                true
+            }
             KeyCode::Esc | KeyCode::Char('q') => {
                 app.should_quit = true;
                 true
             }
             _ => false,
         },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Screen: BrowseImage
+// ---------------------------------------------------------------------------
+
+fn handle_browse_image(app: &mut App, key: KeyEvent) -> bool {
+    let outcome = app.file_explorer.handle_key(key);
+    match outcome {
+        ExplorerOutcome::Selected(path) => {
+            app.apply_explorer_selection(path);
+            true
+        }
+        ExplorerOutcome::Dismissed => {
+            app.screen = AppScreen::SelectImage;
+            app.input_mode = InputMode::Editing;
+            true
+        }
+        ExplorerOutcome::Pending => true,
+        ExplorerOutcome::Unhandled => false,
     }
 }
 

@@ -15,6 +15,7 @@ use std::{
 use tokio::sync::mpsc;
 
 use crate::domain::{DriveInfo, ImageInfo};
+use crate::file_explorer::FileExplorer;
 
 // ---------------------------------------------------------------------------
 // Flash progress events (TUI-specific, Tokio-channel-based)
@@ -59,6 +60,8 @@ pub enum AppScreen {
     /// Step 1 — type (or paste) the path to an OS image.
     #[default]
     SelectImage,
+    /// Step 1b — interactive file-browser overlay for picking the OS image.
+    BrowseImage,
     /// Step 2 — choose a USB drive from the detected list.
     SelectDrive,
     /// Step 2½ — pie-chart overview of the selected drive's storage.
@@ -140,6 +143,10 @@ pub struct App {
     /// Scroll offset for the USB contents list.
     pub contents_scroll: usize,
 
+    // ── File explorer ─────────────────────────────────────────────────────────
+    /// File-browser state used on the `BrowseImage` screen.
+    pub file_explorer: FileExplorer,
+
     // ── Error ─────────────────────────────────────────────────────────────────
     /// Error message shown on the error screen.
     pub error_message: String,
@@ -157,6 +164,12 @@ impl App {
     // -----------------------------------------------------------------------
 
     pub fn new() -> Self {
+        // Start the file explorer in the user's home directory (or current
+        // working directory as a fallback), pre-filtered for image files.
+        let start_dir = dirs::home_dir()
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("/"));
+
         Self {
             screen: AppScreen::SelectImage,
             image_input: String::new(),
@@ -177,6 +190,7 @@ impl App {
             flash_rx: None,
             usb_contents: Vec::new(),
             contents_scroll: 0,
+            file_explorer: FileExplorer::new(start_dir, vec!["iso".into(), "img".into()]),
             error_message: String::new(),
             tick_count: 0,
             should_quit: false,
@@ -457,6 +471,10 @@ impl App {
     /// Go back one step (where meaningful).
     pub fn go_back(&mut self) {
         match self.screen {
+            AppScreen::BrowseImage => {
+                self.screen = AppScreen::SelectImage;
+                self.input_mode = InputMode::Editing;
+            }
             AppScreen::SelectDrive => {
                 self.screen = AppScreen::SelectImage;
                 self.input_mode = InputMode::Editing;
@@ -469,6 +487,38 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // File explorer helpers
+    // -----------------------------------------------------------------------
+
+    /// Open the interactive file browser, navigating to the directory of the
+    /// currently typed path (if valid) or falling back to the home directory.
+    pub fn open_file_explorer(&mut self) {
+        // Try to derive a sensible starting directory from the current input.
+        let typed = PathBuf::from(self.image_input.trim());
+        let start_dir = if typed.is_dir() {
+            typed
+        } else if let Some(parent) = typed.parent().filter(|p| p.is_dir()) {
+            parent.to_path_buf()
+        } else {
+            dirs::home_dir()
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| PathBuf::from("/"))
+        };
+
+        self.file_explorer.navigate_to(start_dir);
+        self.screen = AppScreen::BrowseImage;
+    }
+
+    /// Accept a path chosen by the file explorer, populate the image-input
+    /// field, and return to the `SelectImage` screen.
+    pub fn apply_explorer_selection(&mut self, path: PathBuf) {
+        self.image_input = path.to_string_lossy().to_string();
+        self.image_cursor = self.image_input.chars().count();
+        self.input_mode = InputMode::Editing;
+        self.screen = AppScreen::SelectImage;
     }
 
     // -----------------------------------------------------------------------

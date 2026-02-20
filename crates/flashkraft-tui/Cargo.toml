@@ -28,6 +28,12 @@ tui-slider   = { workspace = true }
 tui-piechart = { workspace = true }
 tui-checkbox = { workspace = true }
 
+# ── Filesystem helpers ────────────────────────────────────────────────────────
+dirs   = { workspace = true }
+
 # ── Async runtime ─────────────────────────────────────────────────────────────
 tokio  = { workspace = true }
 anyhow = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
