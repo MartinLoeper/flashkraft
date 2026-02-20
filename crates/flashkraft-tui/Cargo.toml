@@ -1,0 +1,29 @@
+[package]
+name = "flashkraft-tui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "FlashKraft — OS image writer terminal application (Ratatui TUI)"
+categories = ["command-line-utilities", "filesystem"]
+keywords = ["imager", "disk", "usb", "iso", "flash"]
+
+[[bin]]
+name = "flashkraft-tui"
+path = "src/main.rs"
+
+[dependencies]
+# ── Shared core ───────────────────────────────────────────────────────────────
+flashkraft-core = { workspace = true }
+
+# ── TUI framework ─────────────────────────────────────────────────────────────
+ratatui      = { workspace = true }
+crossterm    = { workspace = true }
+tui-slider   = { workspace = true }
+tui-piechart = { workspace = true }
+tui-checkbox = { workspace = true }
+
+# ── Async runtime ─────────────────────────────────────────────────────────────
+tokio  = { workspace = true }
+anyhow = { workspace = true }

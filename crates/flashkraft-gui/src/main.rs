@@ -1,61 +1,22 @@
-//! FlashKraft - OS Image Writer
+//! FlashKraft GUI — Iced desktop application entry point
 //!
-//! A Balena Etcher-inspired application built with Rust and Iced,
-//! following The Elm Architecture pattern.
+//! ## Dual-mode binary
 //!
-//! # The Elm Architecture
+//! This binary serves two distinct roles depending on its argv:
 //!
-//! This application is structured around four core concepts:
+//! | Invocation | Role |
+//! |---|---|
+//! | `flashkraft` | Normal Iced GUI startup |
+//! | `pkexec flashkraft --flash-helper <image> <device>` | Privileged flash helper |
 //!
-//! 1. **Model** - Application state (`core/state.rs`)
-//! 2. **Message** - Events that trigger state changes (`core/message.rs`)
-//! 3. **Update** - State transition logic (`core/update.rs`)
-//! 4. **View** - UI rendering based on state (`view.rs` + `components/`)
-//!
-//! ## Data Flow
-//!
-//! ```text
-//! User Action → Message → Update → New State → View → UI
-//!                           ↓
-//!                        Command
-//!                           ↓
-//!                    Async Task → Message
-//! ```
-//!
-//! ## Module Structure
-//!
-//! - `core/` - Core application logic (Elm Architecture)
-//!   - `state.rs` - Application state (Model) + Elm methods
-//!   - `message.rs` - Message definitions
-//!   - `update.rs` - Update logic
-//!   - `commands/` - Async commands (side effects)
-//!   - `storage.rs` - Persistent storage
-//!   - `flash_subscription.rs` - Flash operation subscription
-//!
-//! - `domain/` - Domain models
-//!   - `drive_info.rs` - Drive information
-//!   - `image_info.rs` - Image information
-//!
-//! - `components/` - UI components
-//!   - `header.rs` - App header
-//!   - `step_indicators.rs` - Step indicators
-//!   - `progress_line.rs` - Animated progress lines
-//!   - `selection_panels.rs` - Selection buttons
-//!   - `device_selector.rs` - Device selection overlay
-//!   - `status_views.rs` - Status views (flashing, error, complete)
-//!   - `theme_selector.rs` - Theme selector
-//!   - `animated_progress.rs` - Animated progress bar
-//!
-//! - `utils/` - Utility modules
-//!   - `icons_bootstrap_mapper.rs` - Icon utilities
-//!   - `logger.rs` - Logging macros
-//!
-//! - `view.rs` - Main view orchestration
+//! The `--flash-helper` branch is entered automatically by the flash
+//! subscription via `pkexec`; it writes structured progress lines to stdout
+//! and exits without ever touching any windowing code.
 
-use flashkraft::{FlashKraft, Message};
+use flashkraft_gui::{FlashKraft, Message};
 use iced::{Settings, Task};
 
-/// Application entry point
+/// Application entry point.
 ///
 /// If the first argument is `--flash-helper`, we are running as a privileged
 /// child process (launched via `pkexec`).  In that mode we perform the flash
@@ -81,7 +42,7 @@ fn main() -> iced::Result {
 
             // run() writes structured lines to stdout and calls
             // std::process::exit internally on failure.
-            flashkraft::core::flash_helper::run(image_path, device_path);
+            flashkraft_core::flash_helper::run(image_path, device_path);
             std::process::exit(0);
         }
     }
@@ -105,12 +66,12 @@ fn main() -> iced::Result {
         ..Default::default()
     })
     .run_with(|| {
-        // Initialize application state
+        // Initialise application state.
         let initial_state = FlashKraft::new();
 
-        // Load drives on startup
+        // Load drives on startup.
         let initial_command = Task::perform(
-            flashkraft::core::commands::load_drives(),
+            flashkraft_core::commands::load_drives(),
             Message::DrivesRefreshed,
         );
 

@@ -1,61 +1,53 @@
-[package]
-name = "flashkraft"
-version = "0.4.0"
-edition = "2021"
-authors = ["Your Name"]
-description = "An OS Imager app similar to Balena-Etcher written in Rust with the Iced UI Framework"
-license = "MIT"
-repository = "https://github.com/sorinirimies/flashkraft"
-categories = ["gui", "command-line-utilities", "filesystem"]
-keywords = ["imager", "disk", "usb", "iso", "flash"]
+[workspace]
+members = [
+    "crates/flashkraft-core",
+    "crates/flashkraft-gui",
+    "crates/flashkraft-tui",
+]
+resolver = "2"
 
-[lib]
-name = "flashkraft"
-path = "src/lib.rs"
+[workspace.package]
+version      = "0.4.0"
+edition      = "2021"
+authors      = ["Sorin Irimies <sorinirimies@gmail.com>"]
+license      = "MIT"
+repository   = "https://github.com/sorinirimies/flashkraft"
 
-[[bin]]
-name = "flashkraft"
-path = "src/main.rs"
+# ── Shared dependency versions ─────────────────────────────────────────────────
+# Pin versions here once; each crate's Cargo.toml references them with
+# `{ workspace = true }` so there is a single source of truth.
 
-[[bin]]
-name = "flashkraft-tui"
-path = "src/bin/flashkraft_tui.rs"
+[workspace.dependencies]
+# Core / shared
+sysinfo      = "0.30"
+nix          = { version = "0.29", features = ["fs", "ioctl", "mount"] }
+futures      = "0.3"
+futures-timer = "3.0"
+sled         = "0.34"
+dirs         = "5.0"
+sha2         = "0.10"
+tokio        = { version = "1", features = ["full"] }
+anyhow       = "1"
 
-[dependencies]
-# ── GUI (Iced) ────────────────────────────────────────────────────────────────
-iced = { version = "0.13.1", features = ["advanced", "canvas"] }
-iced_aw = "0.12.2"
-iced_fonts = { version = "0.1", features = ["bootstrap"] }
-rfd = "0.15"
+# GUI (Iced)
+iced         = { version = "0.13.1", features = ["advanced", "canvas"] }
+iced_aw      = "0.12.2"
+iced_fonts   = { version = "0.1", features = ["bootstrap"] }
+rfd          = "0.15"
 
-# ── TUI (Ratatui) ─────────────────────────────────────────────────────────────
-ratatui = "0.30"
-crossterm = "0.29"
+# TUI (Ratatui)
+ratatui      = "0.30"
+crossterm    = "0.29"
 tui-slider   = { git = "https://github.com/sorinirimies/tui-slider" }
 tui-piechart = { git = "https://github.com/sorinirimies/tui-piechart" }
 tui-checkbox = { git = "https://github.com/sorinirimies/tui-checkbox" }
 
-# ── Async runtime ─────────────────────────────────────────────────────────────
-tokio = { version = "1", features = ["full"] }
+# Internal crates
+flashkraft-core = { path = "crates/flashkraft-core", version = "0.4.0" }
 
-# ── System / hardware ─────────────────────────────────────────────────────────
-sysinfo = "0.30"
-nix = { version = "0.29", features = ["fs", "ioctl", "mount"] }
-
-# ── Async utilities ───────────────────────────────────────────────────────────
-futures = "0.3"
-futures-timer = "3.0"
-
-# ── Storage / persistence ─────────────────────────────────────────────────────
-sled = "0.34"
-dirs = "5.0"
-
-# ── Crypto ────────────────────────────────────────────────────────────────────
-sha2 = "0.10"
-
-# ── Error handling ────────────────────────────────────────────────────────────
-anyhow = "1"
+[profile.dev]
+opt-level = 0
 
 [profile.release]
 opt-level = 3
-lto = true
+lto       = true

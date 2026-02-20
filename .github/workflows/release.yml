@@ -9,140 +9,330 @@ permissions:
   contents: write
   packages: write
 
+env:
+  CARGO_TERM_COLOR: always
+
+# ── Shared apt packages needed to link the Iced GUI on Linux ─────────────────
+# These are referenced by every job that builds flashkraft-gui.
+# TUI jobs (ratatui/crossterm) need none of these.
+
 jobs:
+  # ── 1. Quality gate ──────────────────────────────────────────────────────────
   test:
-    name: Test
+    name: Test & lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Rust
+      - name: Install Linux GUI system libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libxkbcommon-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libwayland-dev \
+            libgl1-mesa-dev \
+            libfontconfig1-dev \
+            libssl-dev
+
+      - name: Install Rust stable (rustfmt + clippy)
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - name: Cache dependencies
+      - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Run clippy
-        run: cargo clippy -- -D warnings -A deprecated
+      - name: Run clippy (workspace)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings -A deprecated
 
-      - name: Run tests
-        run: cargo test --all-features
+      - name: Run tests (workspace)
+        run: cargo test --workspace --locked --all-features
 
+  # ── 2. Binary builds ─────────────────────────────────────────────────────────
+  # Build GUI and TUI release binaries for each target platform.
+  # The matrix produces one job per (target, runner) combination so builds
+  # run in parallel.
   build:
-    name: Build and release
-    runs-on: ubuntu-latest
+    name: Build — ${{ matrix.target }}
     needs: test
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Linux x86_64 (dynamic — standard distro binary) ─────────────────
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            gui_binary: flashkraft
+            tui_binary: flashkraft-tui
+            suffix: ""
+            install_gui_libs: true
+
+          # ── Linux x86_64 musl (static — runs without glibc) ─────────────────
+          # The GUI links against X11/Wayland so a fully static build is not
+          # practical there; we only produce the TUI musl binary.
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            gui_binary: ""
+            tui_binary: flashkraft-tui
+            suffix: ""
+            install_gui_libs: false
+
+          # ── Linux aarch64 (dynamic) ──────────────────────────────────────────
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            gui_binary: flashkraft
+            tui_binary: flashkraft-tui
+            suffix: ""
+            install_gui_libs: true
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      # ── System libraries (GUI only) ─────────────────────────────────────────
+      - name: Install Linux GUI system libraries
+        if: matrix.install_gui_libs
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libxkbcommon-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libwayland-dev \
+            libgl1-mesa-dev \
+            libfontconfig1-dev \
+            libssl-dev
+
+      # ── musl toolchain (static TUI) ─────────────────────────────────────────
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get install -y --no-install-recommends musl-tools
+
+      # ── aarch64 cross-compiler ───────────────────────────────────────────────
+      - name: Install aarch64 cross-compilation toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            libxkbcommon-dev:arm64 \
+            libx11-dev:arm64 \
+            libwayland-dev:arm64 \
+            libfontconfig1-dev:arm64 || true
+          # Enable multi-arch so apt can fetch arm64 packages
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update -qq || true
+
+      - name: Install Rust stable + target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # ── Configure cross-linker for aarch64 ──────────────────────────────────
+      - name: Set up cross-linker env (aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          mkdir -p .cargo
+          cat >> .cargo/config.toml <<'EOF'
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      # ── Build TUI (all targets) ──────────────────────────────────────────────
+      - name: Build TUI release binary
+        run: |
+          cargo build --release -p flashkraft-tui --target ${{ matrix.target }}
+
+      # ── Build GUI (non-musl targets only) ───────────────────────────────────
+      - name: Build GUI release binary
+        if: matrix.gui_binary != ''
+        run: |
+          cargo build --release -p flashkraft-gui --target ${{ matrix.target }}
+
+      # ── Stage artifacts ──────────────────────────────────────────────────────
+      - name: Stage release artifacts
+        run: |
+          mkdir -p dist
+
+          TARGET="${{ matrix.target }}"
+          SUFFIX="${{ matrix.suffix }}"
+
+          # TUI binary — always present
+          TUI_SRC="target/${TARGET}/release/flashkraft-tui${SUFFIX}"
+          TUI_DST="dist/flashkraft-tui-${TARGET}${SUFFIX}"
+          cp "${TUI_SRC}" "${TUI_DST}"
+          echo "Staged TUI: ${TUI_DST}"
+
+          # GUI binary — present for non-musl targets
+          if [ -n "${{ matrix.gui_binary }}" ]; then
+            GUI_SRC="target/${TARGET}/release/flashkraft${SUFFIX}"
+            GUI_DST="dist/flashkraft-gui-${TARGET}${SUFFIX}"
+            cp "${GUI_SRC}" "${GUI_DST}"
+            echo "Staged GUI: ${GUI_DST}"
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: dist/
+          retention-days: 1
+
+  # ── 3. GitHub Release ────────────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install git-cliff
+        run: cargo install git-cliff --locked
 
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cliff
-        run: cargo install git-cliff
-
-      - name: Update version and generate changelog
+      - name: Generate changelog for this release
         run: |
-          # Extract version from tag (remove 'v' prefix)
-          VERSION=${GITHUB_REF_NAME#v}
-          echo "Updating version to: $VERSION"
-
-          # Update Cargo.toml version
-          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
-
-          # Update full changelog with git-cliff
-          git-cliff --config cliff.toml --latest --output CHANGELOG.md
-
-          # Generate release notes with git-cliff
+          VERSION="${GITHUB_REF_NAME#v}"
           LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
-          # Generate release changelog using git-cliff
-          if [ -n "$LAST_TAG" ]; then
-            # Generate changelog between tags
-            git-cliff --config cliff.toml ${LAST_TAG}..${{ github.ref_name }} --strip header > CLIFF_CHANGES.md
+          {
+            echo "# FlashKraft ${VERSION}"
+            echo ""
+            echo "## 🚀 What's New"
+            echo ""
+          } > RELEASE_NOTES.md
+
+          if [ -n "${LAST_TAG}" ]; then
+            git-cliff --config cliff.toml "${LAST_TAG}".."${GITHUB_REF_NAME}" \
+              --strip header >> RELEASE_NOTES.md
           else
-            # Generate changelog for first release
-            git-cliff --config cliff.toml --tag ${{ github.ref_name }} --strip header > CLIFF_CHANGES.md
+            git-cliff --config cliff.toml --tag "${GITHUB_REF_NAME}" \
+              --strip header >> RELEASE_NOTES.md
           fi
 
-          # Create the release note template
-          echo "# flashkraft ${VERSION}" > RELEASE_CHANGELOG.md
-          echo "" >> RELEASE_CHANGELOG.md
-          echo "## 🚀 What's New" >> RELEASE_CHANGELOG.md
-          echo "" >> RELEASE_CHANGELOG.md
+          {
+            echo ""
+            echo "## 📦 Installation"
+            echo ""
+            echo "### Desktop GUI (Iced)"
+            echo "\`\`\`bash"
+            echo "cargo install flashkraft-gui"
+            echo "\`\`\`"
+            echo ""
+            echo "### Terminal UI (Ratatui)"
+            echo "\`\`\`bash"
+            echo "cargo install flashkraft-tui"
+            echo "\`\`\`"
+            echo ""
+            echo "Or download a pre-built binary below."
+          } >> RELEASE_NOTES.md
 
-          if [ -n "$LAST_TAG" ]; then
-            echo "### 📝 Changes since ${LAST_TAG}:" >> RELEASE_CHANGELOG.md
-            echo "" >> RELEASE_CHANGELOG.md
-          else
-            echo "### 🎉 Initial Release" >> RELEASE_CHANGELOG.md
-            echo "" >> RELEASE_CHANGELOG.md
-          fi
+          # Also update the full CHANGELOG.md
+          git-cliff --config cliff.toml --output CHANGELOG.md
 
-          # Add the git-cliff generated changes to the release notes
-          cat CLIFF_CHANGES.md >> RELEASE_CHANGELOG.md
+      # Download every artifact uploaded by the build matrix
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          pattern: binaries-*
+          merge-multiple: true
 
-          # Add installation and quick start info
-          echo "" >> RELEASE_CHANGELOG.md
-          echo "## 📦 Installation" >> RELEASE_CHANGELOG.md
-          echo "" >> RELEASE_CHANGELOG.md
-          echo "Add this to your \`Cargo.toml\`:" >> RELEASE_CHANGELOG.md
-          echo "" >> RELEASE_CHANGELOG.md
-          echo "\`\`\`toml" >> RELEASE_CHANGELOG.md
-          echo "[dependencies]" >> RELEASE_CHANGELOG.md
-          echo "flashkraft = \"${VERSION}\"" >> RELEASE_CHANGELOG.md
-          echo "\`\`\`" >> RELEASE_CHANGELOG.md
-          echo "" >> RELEASE_CHANGELOG.md
-          echo "Or install with cargo:" >> RELEASE_CHANGELOG.md
-          echo "" >> RELEASE_CHANGELOG.md
-          echo "\`\`\`bash" >> RELEASE_CHANGELOG.md
-          echo "cargo install flashkraft" >> RELEASE_CHANGELOG.md
-          echo "\`\`\`" >> RELEASE_CHANGELOG.md
-          echo "" >> RELEASE_CHANGELOG.md
-
-
-          # Show the generated release notes
-          echo "Generated release notes:"
-          cat RELEASE_CHANGELOG.md
-
-      - name: Build release
-        run: cargo build --release --all-features
+      - name: List artifacts
+        run: ls -lh artifacts/
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          body_path: RELEASE_CHANGELOG.md
+          body_path: RELEASE_NOTES.md
           files: |
+            artifacts/*
             LICENSE
             README.md
             CHANGELOG.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish to crates.io
-        if: env.CRATES_IO_TOKEN != ''
-        env:
-          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: |
-          echo "Publishing to crates.io..."
-          cargo publish --token $CRATES_IO_TOKEN --allow-dirty
+  # ── 4. Publish to crates.io ──────────────────────────────────────────────────
+  # Order matters: core must be published before gui and tui because they
+  # declare it as a dependency.  Each step waits for the index to propagate
+  # (cargo publish --no-verify gives the index a head-start).
+  publish:
+    name: Publish to crates.io
+    needs: release
+    runs-on: ubuntu-latest
+    # Only run when the secret is present — skips silently in forks.
+    if: ${{ secrets.CRATES_IO_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Skip crates.io publish
-        if: env.CRATES_IO_TOKEN == ''
-        env:
-          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+      - name: Install Linux GUI system libraries
         run: |
-          echo "⚠️  CRATES_IO_TOKEN not set. Skipping crates.io publication."
-          echo "To publish to crates.io, add CRATES_IO_TOKEN to your GitHub secrets."
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libxkbcommon-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libwayland-dev \
+            libgl1-mesa-dev \
+            libfontconfig1-dev \
+            libssl-dev
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      # ── Step 1: publish flashkraft-core ─────────────────────────────────────
+      # GUI and TUI both depend on this; it must hit the crates.io index first.
+      - name: Publish flashkraft-core
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          echo "📦 Publishing flashkraft-core…"
+          cargo publish -p flashkraft-core --token "${CARGO_REGISTRY_TOKEN}"
+          echo "⏳ Waiting 30 s for the index to propagate…"
+          sleep 30
+
+      # ── Step 2: publish flashkraft-gui ──────────────────────────────────────
+      - name: Publish flashkraft-gui
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          echo "📦 Publishing flashkraft-gui…"
+          cargo publish -p flashkraft-gui --token "${CARGO_REGISTRY_TOKEN}"
+          echo "⏳ Waiting 20 s for the index to propagate…"
+          sleep 20
+
+      # ── Step 3: publish flashkraft-tui ──────────────────────────────────────
+      - name: Publish flashkraft-tui
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          echo "📦 Publishing flashkraft-tui…"
+          cargo publish -p flashkraft-tui --token "${CARGO_REGISTRY_TOKEN}"
+          echo "✅ All crates published!"

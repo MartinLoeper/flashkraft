@@ -1,250 +1,299 @@
-# flashkraft - An imager to flash your favorite OS on USB stcks and SD cards
+# flashkraft workspace — task runner
 # Install just: cargo install just
 # Install git-cliff: cargo install git-cliff
 # Usage: just <task>
 
-# Default task - show available commands
+# ── Default ───────────────────────────────────────────────────────────────────
+
 default:
     @just --list
 
-# Install required tools (just, git-cliff)
+# ── Tool checks ───────────────────────────────────────────────────────────────
+
+_check-git-cliff:
+    @command -v git-cliff >/dev/null 2>&1 || { \
+        echo "❌ git-cliff not found. Install with: cargo install git-cliff"; exit 1; \
+    }
+
+_check-cargo-edit:
+    @command -v cargo-set-version >/dev/null 2>&1 || { \
+        echo "❌ cargo-edit not found. Install with: cargo install cargo-edit"; exit 1; \
+    }
+
+# Install all recommended development tools
 install-tools:
-    @echo "Installing required tools..."
-    @command -v just >/dev/null 2>&1 || cargo install just
-    @command -v git-cliff >/dev/null 2>&1 || cargo install git-cliff
+    @echo "Installing development tools…"
+    @command -v git-cliff  >/dev/null 2>&1 || cargo install git-cliff
+    @command -v cargo-edit >/dev/null 2>&1 || cargo install cargo-edit
     @echo "✅ All tools installed!"
 
-# Build the project
+# ── Build ─────────────────────────────────────────────────────────────────────
+
+# Build the entire workspace (dev)
 build:
-    cargo build
+    cargo build --workspace
 
-# Build release version
+# Build only the core library (dev)
+build-core:
+    cargo build -p flashkraft-core
+
+# Build only the GUI crate (dev)
+build-gui:
+    cargo build -p flashkraft-gui
+
+# Build only the TUI crate (dev)
+build-tui:
+    cargo build -p flashkraft-tui
+
+# Build release binaries for GUI and TUI
 build-release:
-    cargo build --release
+    cargo build --release -p flashkraft-gui
+    cargo build --release -p flashkraft-tui
 
-# Run the basic usage example
-run:
-    cargo run --example basic_usage
+# Build a static (musl) TUI binary — great for portable distribution
+build-tui-musl:
+    @rustup target add x86_64-unknown-linux-musl 2>/dev/null || true
+    cargo build --release -p flashkraft-tui --target x86_64-unknown-linux-musl
+    @echo "✅ Static TUI binary: target/x86_64-unknown-linux-musl/release/flashkraft-tui"
 
-# Run the theme example
-run-theme:
-    cargo run --example custom_theme
+# ── Run ───────────────────────────────────────────────────────────────────────
 
-# Run tests
+# Launch the Iced desktop GUI
+run-gui:
+    cargo run -p flashkraft-gui
+
+# Launch the Ratatui terminal UI
+run-tui:
+    cargo run -p flashkraft-tui
+
+# Alias: default run launches the TUI (headless-friendly)
+run: run-tui
+
+# ── Test ──────────────────────────────────────────────────────────────────────
+
+# Run the full workspace test suite
 test:
-    cargo test
+    cargo test --workspace --locked --all-features --all-targets
 
-# Run tests with coverage
-test-coverage:
-    cargo tarpaulin --out Html --output-dir coverage
+# Test only the core library
+test-core:
+    cargo test -p flashkraft-core --all-features
 
-# Check code without building
+# Test only the GUI crate
+test-gui:
+    cargo test -p flashkraft-gui --all-features
+
+# Test only the TUI crate
+test-tui:
+    cargo test -p flashkraft-tui --all-features
+
+# ── Code quality ──────────────────────────────────────────────────────────────
+
+# Check without building
 check:
-    cargo check
+    cargo check --workspace
 
-# Format code
+# Format all code
 fmt:
-    cargo fmt
+    cargo fmt --all
 
-# Check if code is formatted
+# Check formatting without modifying files
 fmt-check:
-    cargo fmt --check
+    cargo fmt --all -- --check
 
-# Run clippy linter
+# Run clippy across the workspace
 clippy:
-    cargo clippy -- -D warnings
+    cargo clippy --workspace --all-targets --all-features -- -D warnings -A deprecated
 
-# Run all checks (fmt, clippy, test)
+# Run all quality checks (fmt, clippy, test) — must pass before a release
 check-all: fmt-check clippy test
     @echo "✅ All checks passed!"
 
-# Clean build artifacts
+# ── Documentation ─────────────────────────────────────────────────────────────
+
+# Generate and open docs for the GUI crate
+doc-gui:
+    cargo doc --no-deps -p flashkraft-gui --open
+
+# Generate and open docs for the TUI crate
+doc-tui:
+    cargo doc --no-deps -p flashkraft-tui --open
+
+# Generate docs for the full workspace (no browser)
+doc:
+    cargo doc --no-deps --workspace
+
+# ── Changelog ─────────────────────────────────────────────────────────────────
+
+# Regenerate the full CHANGELOG.md from all tags
+changelog: _check-git-cliff
+    @echo "Generating full changelog…"
+    git-cliff --output CHANGELOG.md
+    @echo "✅ CHANGELOG.md updated."
+
+# Prepend only unreleased commits to CHANGELOG.md
+changelog-unreleased: _check-git-cliff
+    git-cliff --unreleased --prepend CHANGELOG.md
+    @echo "✅ Unreleased changes prepended."
+
+# Preview changelog for the next release without writing the file
+changelog-preview: _check-git-cliff
+    @git-cliff --unreleased
+
+# ── Version bump ─────────────────────────────────────────────────────────────
+# Usage: just bump 0.5.0
+#
+# Runs fmt → clippy → test → changelog → commit → tag, then shows push hints.
+
+bump version: check-all _check-git-cliff
+    @echo "Bumping workspace version to {{version}}…"
+    @./scripts/bump_version.sh {{version}}
+
+# ── Publish (crates.io) ───────────────────────────────────────────────────────
+# Publish order must be: core → gui → tui (dependency order).
+# GUI and TUI are the only crates intended for public consumption; core is
+# published as a prerequisite because cargo requires resolved version deps.
+
+# Dry-run publish for all three crates (in dependency order)
+publish-dry:
+    @echo "Dry-run: flashkraft-core"
+    cargo publish --dry-run -p flashkraft-core
+    @echo "Dry-run: flashkraft-gui"
+    cargo publish --dry-run -p flashkraft-gui
+    @echo "Dry-run: flashkraft-tui"
+    cargo publish --dry-run -p flashkraft-tui
+
+# Publish flashkraft-core (prerequisite for the other two)
+publish-core:
+    @echo "📦 Publishing flashkraft-core…"
+    cargo publish -p flashkraft-core
+    @echo "⏳ Waiting 30 s for the index to propagate…"
+    sleep 30
+
+# Publish flashkraft-gui (requires core to already be on crates.io)
+publish-gui:
+    @echo "📦 Publishing flashkraft-gui…"
+    cargo publish -p flashkraft-gui
+
+# Publish flashkraft-tui (requires core to already be on crates.io)
+publish-tui:
+    @echo "📦 Publishing flashkraft-tui…"
+    cargo publish -p flashkraft-tui
+
+# Publish all three in the correct dependency order
+publish: publish-core publish-gui publish-tui
+    @echo "✅ All crates published to crates.io!"
+
+# ── Housekeeping ──────────────────────────────────────────────────────────────
+
+# Remove build artifacts
 clean:
     cargo clean
 
-# Check if git-cliff is installed
-check-git-cliff:
-    @command -v git-cliff >/dev/null 2>&1 || { echo "❌ git-cliff not found. Install with: cargo install git-cliff"; exit 1; }
-
-# Generate full changelog from all tags
-changelog: check-git-cliff
-    @echo "Generating full changelog..."
-    git-cliff -o CHANGELOG.md
-    @echo "✅ Changelog generated!"
-
-# Generate changelog for unreleased commits only
-changelog-unreleased: check-git-cliff
-    @echo "Generating unreleased changelog..."
-    git-cliff --unreleased --prepend CHANGELOG.md
-    @echo "✅ Unreleased changelog generated!"
-
-# Generate changelog for specific version tag
-changelog-version version: check-git-cliff
-    @echo "Generating changelog for version {{version}}..."
-    git-cliff --tag v{{version}} -o CHANGELOG.md
-    @echo "✅ Changelog generated for version {{version}}!"
-
-# Preview changelog without writing to file
-changelog-preview: check-git-cliff
-    @git-cliff
-
-# Preview unreleased changes
-changelog-preview-unreleased: check-git-cliff
-    @git-cliff --unreleased
-
-# Generate changelog for latest tag only
-changelog-latest: check-git-cliff
-    @echo "Generating changelog for latest tag..."
-    git-cliff --latest -o CHANGELOG.md
-    @echo "✅ Latest changelog generated!"
-
-# Update changelog with all commits (force regenerate)
-changelog-update: check-git-cliff
-    @echo "Regenerating complete changelog from all tags..."
-    git-cliff --output CHANGELOG.md
-    @echo "✅ Changelog updated from all git history!"
-
-# Bump version (usage: just bump 0.2.0)
-bump version: check-git-cliff
-    @echo "Bumping version to {{version}}..."
-    @./scripts/bump_version.sh {{version}}
-
-# Quick release: format, check, test, and build
-release-check: fmt clippy test build-release
-    @echo "✅ Ready for release!"
-
-# Publish to crates.io (dry run)
-publish-dry:
-    cargo publish --dry-run
-
-# Publish to crates.io
-publish:
-    cargo publish
-
-# Update dependencies
+# Update all dependencies
 update:
     cargo update
 
-# Show outdated dependencies
+# Show outdated dependencies (requires cargo-outdated)
 outdated:
     cargo outdated
 
-# Generate documentation
-doc:
-    cargo doc --no-deps --open
-
-# Watch and auto-run on file changes (requires cargo-watch)
-watch:
-    cargo watch -x "run --example basic_usage"
-
-# Git: commit current changes
-commit message:
-    git add .
-    git commit -m "{{message}}"
-
-# Show current version
+# Show the current workspace version
 version:
-    @grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
-
-# Show git-cliff info
-cliff-info:
-    @echo "Git-cliff configuration:"
-    @echo "  Config file: cliff.toml"
-    @echo "  Installed: $(command -v git-cliff >/dev/null 2>&1 && echo '✅ Yes' || echo '❌ No (run: just install-tools)')"
-    @command -v git-cliff >/dev/null 2>&1 && git-cliff --version || true
+    @grep -A5 '^\[workspace\.package\]' Cargo.toml \
+        | grep '^version' \
+        | head -1 \
+        | sed 's/version *= *"\(.*\)"/\1/'
 
 # Show project info
 info:
-    @echo "Project: flashkraft"
-    @echo "Version: $(just version)"
-    @echo "Author: Sorin Albu-Irimies"
-    @echo "License: MIT"
+    @echo "Project:   flashkraft"
+    @echo "Version:   $(just version)"
+    @echo "Author:    Sorin Irimies"
+    @echo "License:   MIT"
+    @echo ""
+    @echo "Crates:"
+    @echo "  flashkraft-core  — shared domain + flash engine (internal)"
+    @echo "  flashkraft-gui   — Iced desktop GUI"
+    @echo "  flashkraft-tui   — Ratatui terminal UI"
 
-# View changelog
-view-changelog:
-    @cat CHANGELOG.md
+# ── Git helpers ───────────────────────────────────────────────────────────────
 
-# Run the VHS tapes to generate demo GIF
-vhs:
-    @echo "Running VHS tapes to generate demo..."
-    vhs examples/vhs/demo-examples.tape
-    @echo "✅ Demo generated at examples/vhs/demo-examples.gif"
+# Show configured remotes
+remotes:
+    @git remote -v
 
-# ============================================================================
-# Gitea Dual-Hosting Commands
-# ============================================================================
+# Stage all changes and commit
+commit message:
+    git add -A
+    git commit -m "{{message}}"
 
-# Git: push to GitHub (origin)
+# Push the current branch to GitHub (origin)
 push:
     git push origin main
 
-# Git: push to Gitea
+# Push the current branch to Gitea
 push-gitea:
     git push gitea main
 
-# Git: push to both GitHub and Gitea
+# Push the current branch to both remotes
 push-all:
     git push origin main
     git push gitea main
     @echo "✅ Pushed to both GitHub and Gitea!"
 
-# Git: push tags to GitHub
+# Push all tags to GitHub
 push-tags:
     git push origin --tags
 
-# Git: push tags to both remotes
+# Push all tags to both remotes
 push-tags-all:
     git push origin --tags
     git push gitea --tags
-    @echo "✅ Tags pushed to both GitHub and Gitea!"
+    @echo "✅ Tags pushed to both remotes!"
 
-# Full release workflow: bump version and push to GitHub
+# ── Release workflows ─────────────────────────────────────────────────────────
+# These combine bump + push so the CI release workflow fires automatically.
+
+# Release to GitHub only: bump, commit, tag, push branch + tag
 release version: (bump version)
-    @echo "Pushing to GitHub..."
+    @echo "Pushing release v{{version}} to GitHub…"
     git push origin main
-    git push origin v{{version}}
-    @echo "✅ Release v{{version}} complete on GitHub!"
+    git push origin "v{{version}}"
+    @echo "✅ Release v{{version}} live on GitHub — CI will build & publish."
 
-# Full release workflow: bump version and push to Gitea
+# Release to Gitea only
 release-gitea version: (bump version)
-    @echo "Pushing to Gitea..."
+    @echo "Pushing release v{{version}} to Gitea…"
     git push gitea main
-    git push gitea v{{version}}
-    @echo "✅ Release v{{version}} complete on Gitea!"
+    git push gitea "v{{version}}"
+    @echo "✅ Release v{{version}} live on Gitea."
 
-# Full release workflow: bump version and push to both GitHub and Gitea
+# Release to both GitHub and Gitea
 release-all version: (bump version)
-    @echo "Pushing to both GitHub and Gitea..."
+    @echo "Pushing release v{{version}} to all remotes…"
     git push origin main
     git push gitea main
-    git push origin v{{version}}
-    git push gitea v{{version}}
-    @echo "✅ Release v{{version}} complete on both remotes!"
+    git push origin "v{{version}}"
+    git push gitea "v{{version}}"
+    @echo "✅ Release v{{version}} pushed to GitHub and Gitea!"
 
-# Push release to both GitHub and Gitea (without bumping)
+# Push the latest commit and all tags to every remote (no bump)
 push-release-all:
-    @echo "Pushing release to both GitHub and Gitea..."
     git push origin main
     git push gitea main
     git push origin --tags
     git push gitea --tags
-    @echo "✅ Release pushed to both remotes!"
+    @echo "✅ Latest commit + tags pushed to all remotes."
 
-# Sync Gitea with GitHub (force)
+# Force-sync Gitea with GitHub
 sync-gitea:
-    @echo "Syncing Gitea with GitHub..."
     git push gitea main --force
     git push gitea --tags --force
-    @echo "✅ Gitea synced!"
+    @echo "✅ Gitea force-synced with GitHub."
 
-# Show configured remotes
-remotes:
-    @echo "Configured git remotes:"
-    @git remote -v
-
-# Setup Gitea remote (provide your Gitea URL)
+# Add a Gitea remote (provide full URL)
 setup-gitea url:
-    @echo "Adding Gitea remote..."
     git remote add gitea {{url}}
-    @echo "✅ Gitea remote added!"
-    @echo "Test with: git push gitea main"
+    @echo "✅ Gitea remote added: {{url}}"
+    @echo "Verify with: just remotes"

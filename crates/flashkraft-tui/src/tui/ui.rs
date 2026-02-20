@@ -7,9 +7,9 @@
 //! Widget usage:
 //! - [`tui_slider::Slider`]     — flash-progress bar (Flashing screen)
 //! - [`tui_piechart::PieChart`] — drive-storage overview (DriveInfo screen)
-//!                                and file-type breakdown (Complete screen)
+//!   and file-type breakdown (Complete screen)
 //! - [`tui_checkbox::Checkbox`] — drive-list items (SelectDrive screen)
-//!                                and confirmation checklist (ConfirmFlash screen)
+//!   and confirmation checklist (ConfirmFlash screen)
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -322,7 +322,7 @@ fn render_select_drive(app: &mut App, frame: &mut Frame, area: Rect) {
             .enumerate()
             .map(|(i, d)| {
                 let selected = i == app.drive_cursor;
-                let is_selected_drive = app.selected_drive.as_ref().map_or(false, |sd| sd == d);
+                let is_selected_drive = app.selected_drive.as_ref() == Some(d);
 
                 // tui-checkbox: checked if this is the actively selected drive,
                 // styled differently if it is the highlighted cursor row.
@@ -751,7 +751,7 @@ fn render_confirm_flash(app: &mut App, frame: &mut Frame, area: Rect) {
     let drive_ready = app
         .selected_drive
         .as_ref()
-        .map_or(false, |d| !d.is_system && !d.is_read_only);
+        .is_some_and(|d| !d.is_system && !d.is_read_only);
 
     let cb_drive = Checkbox::new(
         format!(
@@ -1112,9 +1112,11 @@ fn render_contents_piechart(app: &App, frame: &mut Frame, area: Rect) {
     let cb_rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints(
-            std::iter::repeat(Constraint::Length(1))
-                .take(legend_lines.len().min(rows[1].height as usize))
-                .collect::<Vec<_>>(),
+            std::iter::repeat_n(
+                Constraint::Length(1),
+                legend_lines.len().min(rows[1].height as usize),
+            )
+            .collect::<Vec<_>>(),
         )
         .split(rows[1]);
 
@@ -1263,7 +1265,7 @@ fn build_filetype_piechart(
     for (i, (label, count)) in counts.iter().enumerate() {
         let pct = *count as f64 / total as f64 * 100.0;
         let color = slice_color(i);
-        slices.push(PieSlice::new(*label, pct, color));
+        slices.push(PieSlice::new(label, pct, color));
         legend.push((label.to_string(), *count, color));
     }
 

@@ -1,0 +1,27 @@
+[package]
+name = "flashkraft-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared core logic for FlashKraft — domain models, flash pipeline, drive detection"
+categories = ["command-line-utilities", "filesystem"]
+keywords = ["imager", "disk", "usb", "iso", "flash"]
+
+[dependencies]
+# ── System / hardware ─────────────────────────────────────────────────────────
+sysinfo       = { workspace = true }
+nix           = { workspace = true }
+
+# ── Async utilities ───────────────────────────────────────────────────────────
+futures       = { workspace = true }
+futures-timer = { workspace = true }
+tokio         = { workspace = true }
+
+# ── Storage / persistence ─────────────────────────────────────────────────────
+sled          = { workspace = true }
+dirs          = { workspace = true }
+
+# ── Crypto ────────────────────────────────────────────────────────────────────
+sha2          = { workspace = true }
