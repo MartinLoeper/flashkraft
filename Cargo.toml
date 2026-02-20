@@ -43,7 +43,7 @@ tui-piechart = { git = "https://github.com/sorinirimies/tui-piechart" }
 tui-checkbox = { git = "https://github.com/sorinirimies/tui-checkbox" }
 
 # Internal crates
-flashkraft-core = { path = "crates/flashkraft-core", version = "0.4.0" }
+flashkraft-core = { path = "crates/flashkraft-core", version = "0.4.1" }
 
 [profile.dev]
 opt-level = 0
