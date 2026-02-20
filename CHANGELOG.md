@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.4.2 - 2026-02-20
+### 📦 Other Changes
+- system showcase
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.4.1...v0.4.2
 ## 0.4.1 - 2026-02-20
 ### ♻️ Refactor
 - Refactor into workspace with core, GUI, and TUI crates
@@ -21,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - chore: bump version to 0.3.4
 - chore: bump version to 0.3.5
 - chore: bump version to 0.3.5
+- chore: bump version to 0.4.1
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.3.2...v0.4.1
 ## 0.3.2 - 2025-10-30
 ### ➕ Added
