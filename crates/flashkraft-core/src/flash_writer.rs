@@ -420,7 +420,7 @@ mod tests {
     fn test_parse_dd_progress_clamps_to_one() {
         // bytes_written > image_size (e.g. image is a compressed stream)
         let line = "2000000000 bytes (2.0 GB, 1.9 GiB) copied, 30.2 s, 35.6 MB/s";
-        let p = parse_dd_progress(&line, IMAGE_1G).expect("should parse");
+        let p = parse_dd_progress(line, IMAGE_1G).expect("should parse");
         assert!(p.progress <= 1.0, "progress={}", p.progress);
         assert!(p.progress >= 0.0, "progress={}", p.progress);
     }

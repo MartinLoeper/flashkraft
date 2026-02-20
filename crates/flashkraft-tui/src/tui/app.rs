@@ -492,7 +492,7 @@ impl App {
         if let Some(mp) = mount_point {
             let root = PathBuf::from(&mp);
             let mut entries = Vec::new();
-            collect_entries(&root, &root, 0, &mut entries, 3); // max 3 levels deep
+            collect_entries(&root, 0, &mut entries, 3); // max 3 levels deep
             self.usb_contents = entries;
         } else {
             // Device not (yet) mounted — show a placeholder.
@@ -577,13 +577,7 @@ fn find_mount_point(device_path: &str) -> Option<String> {
 }
 
 /// Recursively collect file/directory entries up to `max_depth` levels.
-fn collect_entries(
-    root: &PathBuf,
-    dir: &PathBuf,
-    depth: usize,
-    out: &mut Vec<UsbEntry>,
-    max_depth: usize,
-) {
+fn collect_entries(dir: &PathBuf, depth: usize, out: &mut Vec<UsbEntry>, max_depth: usize) {
     if depth > max_depth {
         return;
     }
@@ -624,7 +618,940 @@ fn collect_entries(
         });
 
         if is_dir && depth < max_depth {
-            collect_entries(root, &path, depth + 1, out, max_depth);
+            collect_entries(&path, depth + 1, out, max_depth);
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    // ── Test helpers ─────────────────────────────────────────────────────────
+
+    /// Create a test drive with the given flags.
+    fn make_drive(name: &str, device: &str, system: bool, ro: bool) -> DriveInfo {
+        DriveInfo::with_constraints(
+            name.into(),
+            format!("/media/{name}"),
+            16.0,
+            device.into(),
+            system,
+            ro,
+        )
+    }
+
+    /// Create a test ImageInfo with a known size.
+    fn make_image(size_mb: f64) -> ImageInfo {
+        ImageInfo {
+            path: PathBuf::from("/tmp/test_image.img"),
+            name: "test_image.img".into(),
+            size_mb,
+        }
+    }
+
+    // ── Initial state ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_new_initial_state() {
+        let app = App::new();
+        assert_eq!(app.screen, AppScreen::SelectImage);
+        assert_eq!(app.input_mode, InputMode::Editing);
+        assert!(app.image_input.is_empty());
+        assert_eq!(app.image_cursor, 0);
+        assert!(app.available_drives.is_empty());
+        assert!(app.selected_image.is_none());
+        assert!(app.selected_drive.is_none());
+        assert!(!app.should_quit);
+        assert_eq!(app.flash_progress, 0.0);
+        assert_eq!(app.flash_bytes, 0);
+        assert_eq!(app.flash_speed, 0.0);
+        assert!(app.flash_log.is_empty());
+        assert_eq!(app.tick_count, 0);
+        assert!(app.error_message.is_empty());
+        assert!(app.usb_contents.is_empty());
+        assert_eq!(app.contents_scroll, 0);
+        assert!(!app.drives_loading);
+    }
+
+    #[test]
+    fn test_default_equals_new() {
+        let a = App::new();
+        let b = App::default();
+        // Both should be in the same initial screen
+        assert_eq!(a.screen, b.screen);
+        assert_eq!(a.input_mode, b.input_mode);
+        assert_eq!(a.image_input, b.image_input);
+    }
+
+    // ── Image text field ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_image_insert_appends_and_advances_cursor() {
+        let mut app = App::new();
+        app.image_insert('h');
+        app.image_insert('i');
+        assert_eq!(app.image_input, "hi");
+        assert_eq!(app.image_cursor, 2);
+    }
+
+    #[test]
+    fn test_image_insert_at_middle_position() {
+        let mut app = App::new();
+        for c in "abcd".chars() {
+            app.image_insert(c);
+        }
+        // Move cursor to position 2 (between 'b' and 'c')
+        app.image_cursor = 2;
+        app.image_insert('X');
+        assert_eq!(app.image_input, "abXcd");
+        assert_eq!(app.image_cursor, 3);
+    }
+
+    #[test]
+    fn test_image_insert_unicode_chars() {
+        let mut app = App::new();
+        app.image_insert('→');
+        app.image_insert('∞');
+        assert_eq!(app.image_input, "→∞");
+        assert_eq!(app.image_cursor, 2);
+    }
+
+    #[test]
+    fn test_image_backspace_deletes_previous_char() {
+        let mut app = App::new();
+        for c in "hello".chars() {
+            app.image_insert(c);
+        }
+        app.image_backspace();
+        assert_eq!(app.image_input, "hell");
+        assert_eq!(app.image_cursor, 4);
+    }
+
+    #[test]
+    fn test_image_backspace_at_start_is_noop() {
+        let mut app = App::new();
+        app.image_insert('a');
+        app.image_cursor = 0;
+        app.image_backspace();
+        // Nothing deleted, cursor stays at 0
+        assert_eq!(app.image_input, "a");
+        assert_eq!(app.image_cursor, 0);
+    }
+
+    #[test]
+    fn test_image_backspace_empty_string_is_noop() {
+        let mut app = App::new();
+        app.image_backspace(); // should not panic
+        assert!(app.image_input.is_empty());
+        assert_eq!(app.image_cursor, 0);
+    }
+
+    #[test]
+    fn test_image_cursor_left_clamps_at_zero() {
+        let mut app = App::new();
+        app.image_cursor_left(); // already 0 — no-op
+        assert_eq!(app.image_cursor, 0);
+    }
+
+    #[test]
+    fn test_image_cursor_left_decrements() {
+        let mut app = App::new();
+        for c in "abc".chars() {
+            app.image_insert(c);
+        }
+        app.image_cursor_left();
+        assert_eq!(app.image_cursor, 2);
+    }
+
+    #[test]
+    fn test_image_cursor_right_clamps_at_end() {
+        let mut app = App::new();
+        for c in "abc".chars() {
+            app.image_insert(c);
+        }
+        // Cursor is already at end (3)
+        app.image_cursor_right();
+        assert_eq!(app.image_cursor, 3);
+    }
+
+    #[test]
+    fn test_image_cursor_right_increments() {
+        let mut app = App::new();
+        for c in "abc".chars() {
+            app.image_insert(c);
+        }
+        app.image_cursor = 0;
+        app.image_cursor_right();
+        assert_eq!(app.image_cursor, 1);
+    }
+
+    #[test]
+    fn test_image_cursor_full_left_right_round_trip() {
+        let mut app = App::new();
+        let text = "/home/user/ubuntu.iso";
+        for c in text.chars() {
+            app.image_insert(c);
+        }
+        let end = text.chars().count();
+        assert_eq!(app.image_cursor, end);
+
+        // Move all the way left
+        for _ in 0..end {
+            app.image_cursor_left();
+        }
+        assert_eq!(app.image_cursor, 0);
+
+        // Move all the way right
+        for _ in 0..end {
+            app.image_cursor_right();
+        }
+        assert_eq!(app.image_cursor, end);
+    }
+
+    // ── confirm_image ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_confirm_image_nonexistent_file_returns_err() {
+        let mut app = App::new();
+        app.image_input = "/nonexistent/path/does_not_exist.iso".into();
+        let result = app.confirm_image();
+        assert!(result.is_err(), "expected Err for missing file");
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("not found") || msg.contains("Not a file") || msg.contains("File"),
+            "error should mention the file: {msg}"
+        );
+        // Screen must not have advanced
+        assert_eq!(app.screen, AppScreen::SelectImage);
+        assert!(app.selected_image.is_none());
+    }
+
+    #[test]
+    fn test_confirm_image_real_file_advances_screen() {
+        use std::io::Write;
+        let path = std::env::temp_dir().join("fk_test_confirm_image.img");
+        {
+            let mut f = std::fs::File::create(&path).expect("create temp");
+            f.write_all(&[0xABu8; 2048]).expect("write");
+        }
+
+        let mut app = App::new();
+        app.image_input = path.to_string_lossy().into();
+        let result = app.confirm_image();
+        let _ = std::fs::remove_file(&path);
+
+        assert!(
+            result.is_ok(),
+            "expected Ok for real file, got: {:?}",
+            result
+        );
+        assert_eq!(app.screen, AppScreen::SelectDrive);
+        assert_eq!(app.input_mode, InputMode::Normal);
+        let img = app.selected_image.expect("image should be set");
+        assert_eq!(img.name, "fk_test_confirm_image.img");
+        assert!(img.size_mb > 0.0);
+    }
+
+    #[test]
+    fn test_confirm_image_directory_returns_err() {
+        let mut app = App::new();
+        app.image_input = std::env::temp_dir().to_string_lossy().into();
+        let result = app.confirm_image();
+        assert!(result.is_err(), "expected Err for directory path");
+        assert_eq!(app.screen, AppScreen::SelectImage);
+    }
+
+    // ── Drive navigation ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_drive_up_clamps_at_zero() {
+        let mut app = App::new();
+        app.available_drives = vec![
+            make_drive("d0", "/dev/sdb", false, false),
+            make_drive("d1", "/dev/sdc", false, false),
+        ];
+        app.drive_cursor = 0;
+        app.drive_up(); // should clamp
+        assert_eq!(app.drive_cursor, 0);
+    }
+
+    #[test]
+    fn test_drive_down_increments() {
+        let mut app = App::new();
+        app.available_drives = vec![
+            make_drive("d0", "/dev/sdb", false, false),
+            make_drive("d1", "/dev/sdc", false, false),
+            make_drive("d2", "/dev/sdd", false, false),
+        ];
+        app.drive_down();
+        assert_eq!(app.drive_cursor, 1);
+        app.drive_down();
+        assert_eq!(app.drive_cursor, 2);
+    }
+
+    #[test]
+    fn test_drive_down_clamps_at_last() {
+        let mut app = App::new();
+        app.available_drives = vec![
+            make_drive("d0", "/dev/sdb", false, false),
+            make_drive("d1", "/dev/sdc", false, false),
+        ];
+        app.drive_cursor = 1; // already at last
+        app.drive_down();
+        assert_eq!(app.drive_cursor, 1);
+    }
+
+    #[test]
+    fn test_drive_up_decrements() {
+        let mut app = App::new();
+        app.available_drives = vec![
+            make_drive("d0", "/dev/sdb", false, false),
+            make_drive("d1", "/dev/sdc", false, false),
+        ];
+        app.drive_cursor = 1;
+        app.drive_up();
+        assert_eq!(app.drive_cursor, 0);
+    }
+
+    #[test]
+    fn test_drive_navigation_on_empty_list() {
+        let mut app = App::new();
+        app.drive_up(); // should not panic
+        app.drive_down(); // should not panic
+        assert_eq!(app.drive_cursor, 0);
+    }
+
+    // ── confirm_drive ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_confirm_drive_ok_advances_to_drive_info() {
+        let mut app = App::new();
+        app.screen = AppScreen::SelectDrive;
+        app.available_drives = vec![make_drive("usb0", "/dev/sdb", false, false)];
+        app.drive_cursor = 0;
+
+        let result = app.confirm_drive();
+        assert!(result.is_ok());
+        assert_eq!(app.screen, AppScreen::DriveInfo);
+        let drive = app.selected_drive.expect("drive should be set");
+        assert_eq!(drive.name, "usb0");
+        assert_eq!(drive.device_path, "/dev/sdb");
+    }
+
+    #[test]
+    fn test_confirm_drive_system_drive_rejected() {
+        let mut app = App::new();
+        app.screen = AppScreen::SelectDrive;
+        app.available_drives = vec![make_drive("sysdrv", "/dev/sda", true, false)];
+        app.drive_cursor = 0;
+
+        let result = app.confirm_drive();
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("system") || msg.contains("sysdrv"),
+            "error should mention system: {msg}"
+        );
+        assert_eq!(app.screen, AppScreen::SelectDrive);
+        assert!(app.selected_drive.is_none());
+    }
+
+    #[test]
+    fn test_confirm_drive_readonly_rejected() {
+        let mut app = App::new();
+        app.screen = AppScreen::SelectDrive;
+        app.available_drives = vec![make_drive("ro_usb", "/dev/sdb", false, true)];
+        app.drive_cursor = 0;
+
+        let result = app.confirm_drive();
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("read-only") || msg.contains("ro_usb"),
+            "error should mention read-only: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_confirm_drive_empty_list_returns_err() {
+        let mut app = App::new();
+        app.screen = AppScreen::SelectDrive;
+        // no drives
+        let result = app.confirm_drive();
+        assert!(result.is_err());
+        assert!(app.selected_drive.is_none());
+    }
+
+    #[test]
+    fn test_confirm_drive_cursor_out_of_bounds_returns_err() {
+        let mut app = App::new();
+        app.screen = AppScreen::SelectDrive;
+        app.available_drives = vec![make_drive("usb0", "/dev/sdb", false, false)];
+        app.drive_cursor = 99; // out of bounds
+
+        let result = app.confirm_drive();
+        assert!(result.is_err());
+    }
+
+    // ── Screen transitions ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_advance_to_confirm() {
+        let mut app = App::new();
+        app.screen = AppScreen::DriveInfo;
+        app.advance_to_confirm();
+        assert_eq!(app.screen, AppScreen::ConfirmFlash);
+    }
+
+    #[test]
+    fn test_go_back_confirm_flash_to_drive_info() {
+        let mut app = App::new();
+        app.screen = AppScreen::ConfirmFlash;
+        app.go_back();
+        assert_eq!(app.screen, AppScreen::DriveInfo);
+    }
+
+    #[test]
+    fn test_go_back_drive_info_to_select_drive() {
+        let mut app = App::new();
+        app.screen = AppScreen::DriveInfo;
+        app.go_back();
+        assert_eq!(app.screen, AppScreen::SelectDrive);
+    }
+
+    #[test]
+    fn test_go_back_select_drive_to_select_image_and_editing() {
+        let mut app = App::new();
+        app.screen = AppScreen::SelectDrive;
+        app.input_mode = InputMode::Normal;
+        app.go_back();
+        assert_eq!(app.screen, AppScreen::SelectImage);
+        assert_eq!(
+            app.input_mode,
+            InputMode::Editing,
+            "go_back from SelectDrive should re-enable editing mode"
+        );
+    }
+
+    #[test]
+    fn test_go_back_is_noop_from_flashing() {
+        let mut app = App::new();
+        app.screen = AppScreen::Flashing;
+        app.go_back();
+        assert_eq!(app.screen, AppScreen::Flashing);
+    }
+
+    #[test]
+    fn test_go_back_is_noop_from_complete() {
+        let mut app = App::new();
+        app.screen = AppScreen::Complete;
+        app.go_back();
+        assert_eq!(app.screen, AppScreen::Complete);
+    }
+
+    #[test]
+    fn test_go_back_is_noop_from_error() {
+        let mut app = App::new();
+        app.screen = AppScreen::Error;
+        app.go_back();
+        assert_eq!(app.screen, AppScreen::Error);
+    }
+
+    #[test]
+    fn test_go_back_is_noop_from_select_image() {
+        let mut app = App::new();
+        app.screen = AppScreen::SelectImage;
+        app.go_back();
+        assert_eq!(app.screen, AppScreen::SelectImage);
+    }
+
+    // ── Flash event handling ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_apply_flash_event_progress_updates_fields() {
+        let mut app = App::new();
+        app.apply_flash_event(FlashEvent::Progress(0.42, 1_048_576, 28.5));
+        assert_eq!(app.flash_progress, 0.42);
+        assert_eq!(app.flash_bytes, 1_048_576);
+        assert_eq!(app.flash_speed, 28.5);
+    }
+
+    #[test]
+    fn test_apply_flash_event_progress_overwrites_previous() {
+        let mut app = App::new();
+        app.apply_flash_event(FlashEvent::Progress(0.2, 512, 10.0));
+        app.apply_flash_event(FlashEvent::Progress(0.7, 2048, 35.0));
+        assert_eq!(app.flash_progress, 0.7);
+        assert_eq!(app.flash_bytes, 2048);
+        assert_eq!(app.flash_speed, 35.0);
+    }
+
+    #[test]
+    fn test_apply_flash_event_stage_sets_label_and_logs() {
+        let mut app = App::new();
+        app.apply_flash_event(FlashEvent::Stage("Writing image to device…".to_string()));
+        assert_eq!(app.flash_stage, "Writing image to device…");
+        assert!(app
+            .flash_log
+            .contains(&"Writing image to device…".to_string()));
+    }
+
+    #[test]
+    fn test_apply_flash_event_log_appends_to_log() {
+        let mut app = App::new();
+        app.apply_flash_event(FlashEvent::Log("SHA-256 verified ✓".to_string()));
+        assert!(app.flash_log.contains(&"SHA-256 verified ✓".to_string()));
+    }
+
+    #[test]
+    fn test_apply_flash_event_multiple_logs_accumulate() {
+        let mut app = App::new();
+        for i in 0..5 {
+            app.apply_flash_event(FlashEvent::Log(format!("log {i}")));
+        }
+        assert_eq!(app.flash_log.len(), 5);
+    }
+
+    #[test]
+    fn test_apply_flash_event_completed_sets_full_progress_and_screen() {
+        let mut app = App::new();
+        app.screen = AppScreen::Flashing;
+        app.flash_progress = 0.9;
+        app.apply_flash_event(FlashEvent::Completed);
+        assert_eq!(app.flash_progress, 1.0);
+        assert_eq!(app.screen, AppScreen::Complete);
+        // A completion message should have been logged
+        assert!(!app.flash_log.is_empty());
+        assert!(app
+            .flash_log
+            .iter()
+            .any(|l| l.contains("complet") || l.contains("success")));
+    }
+
+    #[test]
+    fn test_apply_flash_event_failed_sets_error_screen() {
+        let mut app = App::new();
+        app.screen = AppScreen::Flashing;
+        app.apply_flash_event(FlashEvent::Failed("Write failed: I/O error".to_string()));
+        assert_eq!(app.screen, AppScreen::Error);
+        assert_eq!(app.error_message, "Write failed: I/O error");
+    }
+
+    // ── push_log capacity ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_push_log_enforces_max_capacity() {
+        let mut app = App::new();
+        // Push more than MAX_LOG (200) entries via apply_flash_event
+        for i in 0..250 {
+            app.apply_flash_event(FlashEvent::Log(format!("log line {i}")));
+        }
+        assert!(
+            app.flash_log.len() <= 200,
+            "log should be capped at 200, got {}",
+            app.flash_log.len()
+        );
+        // The most recent entry must be retained
+        assert_eq!(
+            app.flash_log.last().unwrap(),
+            "log line 249",
+            "most-recent log entry must be at the tail"
+        );
+    }
+
+    #[test]
+    fn test_push_log_exactly_at_limit_does_not_trim() {
+        let mut app = App::new();
+        for i in 0..200 {
+            app.apply_flash_event(FlashEvent::Log(format!("entry {i}")));
+        }
+        assert_eq!(app.flash_log.len(), 200);
+    }
+
+    // ── Channel polling ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_poll_drives_applies_result_and_clears_loading() {
+        let (tx, rx) = mpsc::unbounded_channel::<Vec<DriveInfo>>();
+        let drives = vec![
+            make_drive("sdb", "/dev/sdb", false, false),
+            make_drive("sdc", "/dev/sdc", false, false),
+        ];
+        tx.send(drives).unwrap();
+
+        let mut app = App::new();
+        app.drives_loading = true;
+        app.drives_rx = Some(rx);
+
+        app.poll_drives();
+
+        assert_eq!(app.available_drives.len(), 2);
+        assert!(!app.drives_loading, "loading flag should be cleared");
+        assert_eq!(app.drive_cursor, 0, "cursor should reset");
+        assert!(
+            app.drives_rx.is_none(),
+            "one-shot channel should be consumed"
+        );
+    }
+
+    #[test]
+    fn test_poll_drives_keeps_receiver_when_channel_empty() {
+        let (_tx, rx) = mpsc::unbounded_channel::<Vec<DriveInfo>>();
+
+        let mut app = App::new();
+        app.drives_loading = true;
+        app.drives_rx = Some(rx);
+
+        app.poll_drives();
+
+        assert!(app.drives_loading, "loading should stay true");
+        assert!(app.drives_rx.is_some(), "receiver must be retained");
+    }
+
+    #[test]
+    fn test_poll_drives_does_nothing_when_no_receiver() {
+        let mut app = App::new();
+        // drives_rx is None by default
+        app.poll_drives(); // should not panic
+        assert!(app.available_drives.is_empty());
+    }
+
+    #[test]
+    fn test_poll_flash_applies_progress_event() {
+        let (tx, rx) = mpsc::unbounded_channel::<FlashEvent>();
+        tx.send(FlashEvent::Progress(0.5, 1024, 22.0)).unwrap();
+
+        let mut app = App::new();
+        app.flash_rx = Some(rx);
+        app.poll_flash();
+
+        assert_eq!(app.flash_progress, 0.5);
+        assert_eq!(app.flash_bytes, 1024);
+        assert_eq!(app.flash_speed, 22.0);
+    }
+
+    #[test]
+    fn test_poll_flash_drains_multiple_events() {
+        let (tx, rx) = mpsc::unbounded_channel::<FlashEvent>();
+        tx.send(FlashEvent::Stage("WRITING".to_string())).unwrap();
+        tx.send(FlashEvent::Log("Chunk 1 written".to_string()))
+            .unwrap();
+        tx.send(FlashEvent::Progress(0.25, 256, 15.0)).unwrap();
+
+        let mut app = App::new();
+        app.flash_rx = Some(rx);
+        app.poll_flash();
+
+        assert_eq!(app.flash_stage, "WRITING");
+        assert_eq!(app.flash_progress, 0.25);
+        // Stage event also logs, then Log event adds another entry
+        assert!(app.flash_log.len() >= 2);
+    }
+
+    #[test]
+    fn test_poll_flash_keeps_receiver_when_channel_empty() {
+        let (_tx, rx) = mpsc::unbounded_channel::<FlashEvent>();
+
+        let mut app = App::new();
+        app.flash_rx = Some(rx);
+        app.poll_flash();
+
+        assert!(
+            app.flash_rx.is_some(),
+            "receiver must be retained while channel is open"
+        );
+    }
+
+    #[test]
+    fn test_poll_flash_drops_receiver_when_disconnected() {
+        let (tx, rx) = mpsc::unbounded_channel::<FlashEvent>();
+        drop(tx); // close the sender
+
+        let mut app = App::new();
+        app.flash_rx = Some(rx);
+        app.poll_flash();
+
+        assert!(
+            app.flash_rx.is_none(),
+            "receiver should be dropped after disconnect"
+        );
+    }
+
+    // ── begin_flash validation ────────────────────────────────────────────────
+
+    #[test]
+    fn test_begin_flash_without_image_returns_err() {
+        let mut app = App::new();
+        app.selected_drive = Some(make_drive("usb0", "/dev/sdb", false, false));
+        let result = app.begin_flash();
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("image"),
+            "error should mention missing image: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_begin_flash_without_drive_returns_err() {
+        let mut app = App::new();
+        app.selected_image = Some(make_image(512.0));
+        let result = app.begin_flash();
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("drive"),
+            "error should mention missing drive: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_begin_flash_without_both_returns_err() {
+        let mut app = App::new();
+        let result = app.begin_flash();
+        assert!(result.is_err());
+    }
+
+    // ── cancel_flash ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cancel_flash_sets_cancel_token() {
+        use std::sync::atomic::Ordering;
+
+        let mut app = App::new();
+        app.screen = AppScreen::Flashing;
+        assert!(
+            !app.cancel_token.load(Ordering::SeqCst),
+            "cancel token must start as false"
+        );
+
+        app.cancel_flash();
+
+        assert!(
+            app.cancel_token.load(Ordering::SeqCst),
+            "cancel token must be set after cancel_flash"
+        );
+    }
+
+    #[test]
+    fn test_cancel_flash_transitions_to_error_screen() {
+        let mut app = App::new();
+        app.screen = AppScreen::Flashing;
+        app.cancel_flash();
+        assert_eq!(app.screen, AppScreen::Error);
+    }
+
+    #[test]
+    fn test_cancel_flash_sets_error_message() {
+        let mut app = App::new();
+        app.screen = AppScreen::Flashing;
+        app.cancel_flash();
+        assert!(!app.error_message.is_empty(), "error_message must be set");
+        assert!(
+            app.error_message.to_lowercase().contains("cancel"),
+            "error message should mention cancellation: {}",
+            app.error_message
+        );
+    }
+
+    // ── reset ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_reset_returns_to_factory_defaults() {
+        let mut app = App::new();
+
+        // Dirty up the state
+        app.screen = AppScreen::Complete;
+        app.image_input = "/some/path.iso".into();
+        app.image_cursor = 5;
+        app.flash_progress = 0.8;
+        app.flash_bytes = 999_999;
+        app.flash_speed = 42.0;
+        app.flash_stage = "Done".into();
+        app.flash_log = vec!["a".into(), "b".into(), "c".into()];
+        app.tick_count = 1234;
+        app.error_message = "previous error".into();
+        app.should_quit = false;
+        app.selected_image = Some(make_image(100.0));
+        app.selected_drive = Some(make_drive("usb0", "/dev/sdb", false, false));
+
+        app.reset();
+
+        assert_eq!(app.screen, AppScreen::SelectImage);
+        assert!(app.image_input.is_empty(), "image_input must be cleared");
+        assert_eq!(app.image_cursor, 0);
+        assert_eq!(app.flash_progress, 0.0);
+        assert_eq!(app.flash_bytes, 0);
+        assert_eq!(app.flash_speed, 0.0);
+        assert!(app.flash_log.is_empty());
+        assert_eq!(app.tick_count, 0);
+        assert!(app.selected_image.is_none());
+        assert!(app.selected_drive.is_none());
+        assert!(!app.should_quit);
+    }
+
+    // ── Convenience accessors ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_image_size_bytes_returns_zero_when_no_image() {
+        let app = App::new();
+        assert_eq!(app.image_size_bytes(), 0);
+    }
+
+    #[test]
+    fn test_image_size_bytes_converts_mb_to_bytes() {
+        let mut app = App::new();
+        app.selected_image = Some(make_image(512.0)); // 512 MB
+        let expected = (512.0_f64 * 1024.0 * 1024.0) as u64;
+        // Allow ±1 for floating-point truncation
+        assert!(
+            (app.image_size_bytes() as i64 - expected as i64).abs() <= 1,
+            "expected ~{expected} bytes, got {}",
+            app.image_size_bytes()
+        );
+    }
+
+    #[test]
+    fn test_drive_size_bytes_returns_zero_when_no_drive() {
+        let app = App::new();
+        assert_eq!(app.drive_size_bytes(), 0);
+    }
+
+    #[test]
+    fn test_drive_size_bytes_converts_gb_to_bytes() {
+        let mut app = App::new();
+        app.selected_drive = Some(make_drive("usb", "/dev/sdb", false, false));
+        // make_drive uses 16.0 GB
+        let expected = (16.0_f64 * 1024.0 * 1024.0 * 1024.0) as u64;
+        assert!(
+            (app.drive_size_bytes() as i64 - expected as i64).abs() <= 1,
+            "expected ~{expected} bytes, got {}",
+            app.drive_size_bytes()
+        );
+    }
+
+    // ── USB contents scroll ───────────────────────────────────────────────────
+
+    fn make_usb_entries(n: usize) -> Vec<UsbEntry> {
+        (0..n)
+            .map(|i| UsbEntry {
+                name: format!("file_{i:02}.txt"),
+                size_bytes: (i as u64 + 1) * 512,
+                is_dir: i % 4 == 0,
+                depth: 0,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_contents_up_clamps_at_zero() {
+        let mut app = App::new();
+        app.usb_contents = make_usb_entries(5);
+        app.contents_scroll = 0;
+        app.contents_up(); // should not underflow
+        assert_eq!(app.contents_scroll, 0);
+    }
+
+    #[test]
+    fn test_contents_down_increments_scroll() {
+        let mut app = App::new();
+        app.usb_contents = make_usb_entries(5);
+        app.contents_down();
+        assert_eq!(app.contents_scroll, 1);
+        app.contents_down();
+        assert_eq!(app.contents_scroll, 2);
+    }
+
+    #[test]
+    fn test_contents_down_clamps_at_last_entry() {
+        let mut app = App::new();
+        app.usb_contents = make_usb_entries(3); // indices 0..2
+        app.contents_scroll = 2; // already at last
+        app.contents_down();
+        assert_eq!(app.contents_scroll, 2, "should clamp at len-1");
+    }
+
+    #[test]
+    fn test_contents_up_decrements_scroll() {
+        let mut app = App::new();
+        app.usb_contents = make_usb_entries(5);
+        app.contents_scroll = 3;
+        app.contents_up();
+        assert_eq!(app.contents_scroll, 2);
+    }
+
+    #[test]
+    fn test_contents_scroll_on_empty_list_is_noop() {
+        let mut app = App::new();
+        app.contents_up(); // should not panic
+        app.contents_down(); // should not panic
+        assert_eq!(app.contents_scroll, 0);
+    }
+
+    // ── poll_drives / poll_flash edge cases ───────────────────────────────────
+
+    #[test]
+    fn test_poll_flash_completed_event_via_channel() {
+        let (tx, rx) = mpsc::unbounded_channel::<FlashEvent>();
+        tx.send(FlashEvent::Completed).unwrap();
+
+        let mut app = App::new();
+        app.screen = AppScreen::Flashing;
+        app.flash_rx = Some(rx);
+        app.poll_flash();
+
+        assert_eq!(app.screen, AppScreen::Complete);
+        assert_eq!(app.flash_progress, 1.0);
+    }
+
+    #[test]
+    fn test_poll_flash_failed_event_via_channel() {
+        let (tx, rx) = mpsc::unbounded_channel::<FlashEvent>();
+        tx.send(FlashEvent::Failed("Disk full".to_string()))
+            .unwrap();
+
+        let mut app = App::new();
+        app.screen = AppScreen::Flashing;
+        app.flash_rx = Some(rx);
+        app.poll_flash();
+
+        assert_eq!(app.screen, AppScreen::Error);
+        assert_eq!(app.error_message, "Disk full");
+    }
+
+    // ── tick_count wrapping ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_tick_count_wraps_on_overflow() {
+        let mut app = App::new();
+        app.tick_count = u64::MAX;
+        app.tick_count = app.tick_count.wrapping_add(1);
+        assert_eq!(app.tick_count, 0, "tick_count should wrap to 0 at u64::MAX");
+    }
+
+    // ── AppScreen & InputMode derive behaviour ────────────────────────────────
+
+    #[test]
+    fn test_app_screen_default_is_select_image() {
+        assert_eq!(AppScreen::default(), AppScreen::SelectImage);
+    }
+
+    #[test]
+    fn test_input_mode_default_is_normal() {
+        // Default for InputMode::Normal
+        assert_eq!(InputMode::default(), InputMode::Normal);
+    }
+
+    #[test]
+    fn test_app_screen_equality() {
+        assert_eq!(AppScreen::SelectImage, AppScreen::SelectImage);
+        assert_ne!(AppScreen::SelectImage, AppScreen::SelectDrive);
+        assert_ne!(AppScreen::Complete, AppScreen::Error);
     }
 }

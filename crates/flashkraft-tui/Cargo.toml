@@ -9,6 +9,10 @@ description = "FlashKraft — OS image writer terminal application (Ratatui TUI)
 categories = ["command-line-utilities", "filesystem"]
 keywords = ["imager", "disk", "usb", "iso", "flash"]
 
+[lib]
+name = "flashkraft_tui"
+path = "src/lib.rs"
+
 [[bin]]
 name = "flashkraft-tui"
 path = "src/main.rs"

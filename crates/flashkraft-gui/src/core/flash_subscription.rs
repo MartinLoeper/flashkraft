@@ -231,11 +231,10 @@ async fn run_flash_operation(
                                 accumulated = accumulated[pos + 1..].to_string();
 
                                 let trimmed = line.trim().to_string();
-                                if !trimmed.is_empty() {
-                                    if line_tx.clone().try_send(trimmed).is_err() {
-                                        // Receiver dropped — cancellation likely.
-                                        return;
-                                    }
+                                if !trimmed.is_empty() && line_tx.clone().try_send(trimmed).is_err()
+                                {
+                                    // Receiver dropped — cancellation likely.
+                                    return;
                                 }
                             }
                         }
