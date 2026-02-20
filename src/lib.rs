@@ -10,6 +10,7 @@ pub mod utils;
 pub mod components;
 pub mod core;
 pub mod domain;
+pub mod tui;
 pub mod view;
 
 // Re-export commonly used types
