@@ -960,4 +960,154 @@ mod tests {
         // F2 is not handled on DriveInfo
         assert!(!handle_key(&mut app, key(KeyCode::F(2))));
     }
+
+    // ── SelectImage: Tab / Ctrl-F open the file explorer ─────────────────────
+
+    #[test]
+    fn select_image_editing_tab_opens_file_explorer() {
+        let mut app = App::new();
+        assert_eq!(app.input_mode, InputMode::Editing);
+        let consumed = handle_key(&mut app, key(KeyCode::Tab));
+        assert!(consumed);
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+    }
+
+    #[test]
+    fn select_image_editing_ctrl_f_opens_file_explorer() {
+        let mut app = App::new();
+        assert_eq!(app.input_mode, InputMode::Editing);
+        let consumed = handle_key(&mut app, ctrl(KeyCode::Char('f')));
+        assert!(consumed);
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+    }
+
+    #[test]
+    fn select_image_normal_tab_opens_file_explorer() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Normal;
+        let consumed = handle_key(&mut app, key(KeyCode::Tab));
+        assert!(consumed);
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+    }
+
+    // ── BrowseImage screen ────────────────────────────────────────────────────
+
+    #[test]
+    fn browse_image_esc_returns_to_select_image() {
+        let mut app = app_on(AppScreen::BrowseImage);
+        let consumed = handle_key(&mut app, key(KeyCode::Esc));
+        assert!(consumed);
+        assert_eq!(app.screen, AppScreen::SelectImage);
+        assert_eq!(app.input_mode, InputMode::Editing);
+    }
+
+    #[test]
+    fn browse_image_q_dismisses_to_select_image() {
+        let mut app = app_on(AppScreen::BrowseImage);
+        let consumed = handle_key(&mut app, key(KeyCode::Char('q')));
+        assert!(consumed);
+        assert_eq!(app.screen, AppScreen::SelectImage);
+        assert_eq!(app.input_mode, InputMode::Editing);
+    }
+
+    #[test]
+    fn browse_image_down_is_consumed_and_stays_on_browse() {
+        let mut app = app_on(AppScreen::BrowseImage);
+        let consumed = handle_key(&mut app, key(KeyCode::Down));
+        assert!(consumed);
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+    }
+
+    #[test]
+    fn browse_image_j_is_consumed_and_stays_on_browse() {
+        let mut app = app_on(AppScreen::BrowseImage);
+        let consumed = handle_key(&mut app, key(KeyCode::Char('j')));
+        assert!(consumed);
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+    }
+
+    #[test]
+    fn browse_image_up_is_consumed_and_stays_on_browse() {
+        let mut app = app_on(AppScreen::BrowseImage);
+        let consumed = handle_key(&mut app, key(KeyCode::Up));
+        assert!(consumed);
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+    }
+
+    #[test]
+    fn browse_image_k_is_consumed_and_stays_on_browse() {
+        let mut app = app_on(AppScreen::BrowseImage);
+        let consumed = handle_key(&mut app, key(KeyCode::Char('k')));
+        assert!(consumed);
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+    }
+
+    #[test]
+    fn browse_image_page_down_is_consumed() {
+        let mut app = app_on(AppScreen::BrowseImage);
+        let consumed = handle_key(&mut app, key(KeyCode::PageDown));
+        assert!(consumed);
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+    }
+
+    #[test]
+    fn browse_image_page_up_is_consumed() {
+        let mut app = app_on(AppScreen::BrowseImage);
+        let consumed = handle_key(&mut app, key(KeyCode::PageUp));
+        assert!(consumed);
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+    }
+
+    #[test]
+    fn browse_image_unrecognised_key_not_consumed() {
+        let mut app = app_on(AppScreen::BrowseImage);
+        // F5 is not handled by the file explorer.
+        let consumed = handle_key(&mut app, key(KeyCode::F(5)));
+        assert!(!consumed);
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+    }
+
+    #[test]
+    fn browse_image_selected_file_populates_input_and_returns() {
+        use std::fs;
+        let tmp = tempfile::tempdir().unwrap();
+        let iso = tmp.path().join("chosen.iso");
+        fs::write(&iso, b"fake").unwrap();
+
+        let mut app = app_on(AppScreen::BrowseImage);
+        // Navigate the explorer to the temp dir and point cursor at the iso.
+        app.file_explorer.navigate_to(tmp.path().to_path_buf());
+        let iso_idx = app
+            .file_explorer
+            .entries
+            .iter()
+            .position(|e| e.name == "chosen.iso")
+            .expect("chosen.iso must be in entries");
+        app.file_explorer.cursor = iso_idx;
+
+        let consumed = handle_key(&mut app, key(KeyCode::Enter));
+        assert!(consumed);
+        assert_eq!(app.screen, AppScreen::SelectImage);
+        assert_eq!(app.input_mode, InputMode::Editing);
+        assert_eq!(app.image_input, iso.to_string_lossy().as_ref());
+        assert_eq!(app.image_cursor, iso.to_string_lossy().chars().count());
+    }
+
+    #[test]
+    fn browse_image_backspace_ascends_directory() {
+        use std::fs;
+        let tmp = tempfile::tempdir().unwrap();
+        let subdir = tmp.path().join("inner");
+        fs::create_dir(&subdir).unwrap();
+
+        let mut app = app_on(AppScreen::BrowseImage);
+        app.file_explorer.navigate_to(subdir.clone());
+        assert_eq!(app.file_explorer.current_dir, subdir);
+
+        let consumed = handle_key(&mut app, key(KeyCode::Backspace));
+        assert!(consumed);
+        // Should still be on BrowseImage, just one level up.
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+        assert_eq!(app.file_explorer.current_dir, tmp.path());
+    }
 }

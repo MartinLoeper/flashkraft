@@ -1604,4 +1604,124 @@ mod tests {
         assert_ne!(AppScreen::SelectImage, AppScreen::SelectDrive);
         assert_ne!(AppScreen::Complete, AppScreen::Error);
     }
+
+    // ── open_file_explorer ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_open_file_explorer_transitions_to_browse_image() {
+        let mut app = App::new();
+        app.open_file_explorer();
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+    }
+
+    #[test]
+    fn test_open_file_explorer_uses_typed_dir_when_valid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let iso = tmp.path().join("test.iso");
+        std::fs::write(&iso, b"x").unwrap();
+
+        let mut app = App::new();
+        app.image_input = iso.to_string_lossy().to_string();
+        app.open_file_explorer();
+
+        // The explorer should have navigated to the iso's parent directory.
+        assert_eq!(app.file_explorer.current_dir, tmp.path());
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+    }
+
+    #[test]
+    fn test_open_file_explorer_uses_dir_input_directly() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let mut app = App::new();
+        app.image_input = tmp.path().to_string_lossy().to_string();
+        app.open_file_explorer();
+
+        assert_eq!(app.file_explorer.current_dir, tmp.path());
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+    }
+
+    #[test]
+    fn test_open_file_explorer_falls_back_when_input_invalid() {
+        let mut app = App::new();
+        app.image_input = "/this/path/does/not/exist/at/all.iso".to_string();
+        app.open_file_explorer();
+        // Should still transition — fallback to home or cwd.
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+        // The directory must actually exist.
+        assert!(app.file_explorer.current_dir.is_dir());
+    }
+
+    #[test]
+    fn test_open_file_explorer_empty_input_falls_back() {
+        let mut app = App::new();
+        app.image_input = String::new();
+        app.open_file_explorer();
+        assert_eq!(app.screen, AppScreen::BrowseImage);
+        assert!(app.file_explorer.current_dir.is_dir());
+    }
+
+    // ── apply_explorer_selection ──────────────────────────────────────────────
+
+    #[test]
+    fn test_apply_explorer_selection_populates_image_input() {
+        let mut app = App::new();
+        let path = PathBuf::from("/some/path/ubuntu.iso");
+        app.apply_explorer_selection(path.clone());
+        assert_eq!(app.image_input, "/some/path/ubuntu.iso");
+    }
+
+    #[test]
+    fn test_apply_explorer_selection_sets_cursor_to_end() {
+        let mut app = App::new();
+        let path = PathBuf::from("/some/ubuntu.iso");
+        app.apply_explorer_selection(path.clone());
+        let expected_len = path.to_string_lossy().chars().count();
+        assert_eq!(app.image_cursor, expected_len);
+    }
+
+    #[test]
+    fn test_apply_explorer_selection_returns_to_select_image() {
+        let mut app = App::new();
+        app.screen = AppScreen::BrowseImage;
+        app.apply_explorer_selection(PathBuf::from("/some/ubuntu.iso"));
+        assert_eq!(app.screen, AppScreen::SelectImage);
+    }
+
+    #[test]
+    fn test_apply_explorer_selection_sets_editing_mode() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Normal;
+        app.apply_explorer_selection(PathBuf::from("/some/ubuntu.iso"));
+        assert_eq!(app.input_mode, InputMode::Editing);
+    }
+
+    #[test]
+    fn test_apply_explorer_selection_unicode_path() {
+        let mut app = App::new();
+        let path = PathBuf::from("/home/utilisateur/téléchargements/debian.iso");
+        app.apply_explorer_selection(path.clone());
+        let expected_len = path.to_string_lossy().chars().count();
+        assert_eq!(app.image_cursor, expected_len);
+        assert_eq!(app.image_input, path.to_string_lossy().as_ref());
+    }
+
+    // ── go_back from BrowseImage ──────────────────────────────────────────────
+
+    #[test]
+    fn test_go_back_browse_image_to_select_image() {
+        let mut app = App::new();
+        app.screen = AppScreen::BrowseImage;
+        app.go_back();
+        assert_eq!(app.screen, AppScreen::SelectImage);
+    }
+
+    #[test]
+    fn test_go_back_browse_image_restores_editing_mode() {
+        let mut app = App::new();
+        app.screen = AppScreen::BrowseImage;
+        app.input_mode = InputMode::Normal;
+        app.go_back();
+        assert_eq!(app.input_mode, InputMode::Editing);
+    }
 }

@@ -45,18 +45,19 @@ pub mod tui;
 ///
 /// ## Quick start
 ///
-/// ```ignore
+/// ```no_run
 /// use flashkraft_tui::file_explorer::{FileExplorer, ExplorerOutcome};
 ///
 /// let mut explorer = FileExplorer::new(
-///     std::env::home_dir().unwrap_or_default(),
+///     dirs::home_dir().unwrap_or_default(),
 ///     vec!["iso".into(), "img".into()],
 /// );
 ///
-/// // In your render function:
-/// flashkraft_tui::file_explorer::render(&mut explorer, frame, area);
+/// // In your render function (inside a ratatui draw closure):
+/// // flashkraft_tui::file_explorer::render(&mut explorer, frame, frame.area());
 ///
 /// // In your key handler:
+/// # let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Esc, crossterm::event::KeyModifiers::NONE);
 /// match explorer.handle_key(key) {
 ///     ExplorerOutcome::Selected(path) => { /* use path */ }
 ///     ExplorerOutcome::Dismissed      => { /* close explorer */ }

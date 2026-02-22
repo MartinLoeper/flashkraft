@@ -16,17 +16,21 @@
 //!
 //! ## Typical usage
 //!
-//! ```ignore
+//! ```no_run
+//! use flashkraft_tui::file_explorer::{FileExplorer, ExplorerOutcome};
+//! use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+//!
 //! // Create once (e.g. in App::new)
 //! let mut explorer = FileExplorer::new(
-//!     std::env::home_dir().unwrap_or_default(),
+//!     dirs::home_dir().unwrap_or_default(),
 //!     vec!["iso".into(), "img".into()],
 //! );
 //!
-//! // In the render function
-//! file_explorer::render(&mut explorer, frame, area);
+//! // In the render function (inside a ratatui Terminal::draw closure):
+//! // flashkraft_tui::file_explorer::render(&mut explorer, frame, frame.area());
 //!
 //! // In the key-handler
+//! # let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
 //! match explorer.handle_key(key) {
 //!     ExplorerOutcome::Selected(path) => { /* use path */ }
 //!     ExplorerOutcome::Dismissed      => { /* close the explorer */ }

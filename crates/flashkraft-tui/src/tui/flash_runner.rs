@@ -341,3 +341,454 @@ async fn drain_lines(
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    fn make_channel() -> (
+        mpsc::UnboundedSender<FlashEvent>,
+        mpsc::UnboundedReceiver<FlashEvent>,
+    ) {
+        mpsc::unbounded_channel()
+    }
+
+    /// Drain all currently available events from `rx` into a `Vec`.
+    fn drain(rx: &mut mpsc::UnboundedReceiver<FlashEvent>) -> Vec<FlashEvent> {
+        let mut events = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            events.push(ev);
+        }
+        events
+    }
+
+    // ── process_line: STAGE ───────────────────────────────────────────────────
+
+    #[test]
+    fn process_line_stage_writing_sends_stage_event() {
+        let (tx, mut rx) = make_channel();
+        let mut total = 1024u64;
+        let mut last = 0.0f32;
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        let result = process_line("STAGE:WRITING", &tx, &mut total, &mut last, &mut child);
+        assert!(result.is_ok());
+
+        let events = drain(&mut rx);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], FlashEvent::Stage(s) if s.to_lowercase().contains("writ")));
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn process_line_stage_done_sends_completed_and_returns_sentinel() {
+        let (tx, mut rx) = make_channel();
+        let mut total = 1024u64;
+        let mut last = 0.0f32;
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        let result = process_line("STAGE:DONE", &tx, &mut total, &mut last, &mut child);
+        // DONE returns Err("__done__") as a clean-exit sentinel.
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "__done__");
+
+        let events = drain(&mut rx);
+        // Should have received a Stage event then Completed.
+        assert!(events.iter().any(|e| matches!(e, FlashEvent::Completed)));
+        let _ = child.wait();
+    }
+
+    // ── process_line: SIZE ────────────────────────────────────────────────────
+
+    #[test]
+    fn process_line_size_updates_total_size() {
+        let (tx, mut rx) = make_channel();
+        let mut total = 0u64;
+        let mut last = 0.0f32;
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        let result = process_line("SIZE:4096000000", &tx, &mut total, &mut last, &mut child);
+        assert!(result.is_ok());
+        assert_eq!(total, 4_096_000_000);
+        assert!(drain(&mut rx).is_empty(), "SIZE emits no events");
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn process_line_size_zero_does_not_update_total() {
+        let (tx, mut rx) = make_channel();
+        let mut total = 999u64;
+        let mut last = 0.0f32;
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        process_line("SIZE:0", &tx, &mut total, &mut last, &mut child).ok();
+        assert_eq!(total, 999, "zero-size must not overwrite existing total");
+        assert!(drain(&mut rx).is_empty());
+        let _ = child.wait();
+    }
+
+    // ── process_line: PROGRESS ────────────────────────────────────────────────
+
+    #[test]
+    fn process_line_progress_sends_progress_event() {
+        let (tx, mut rx) = make_channel();
+        let mut total = 1_000_000u64;
+        let mut last = 0.0f32;
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        process_line(
+            "PROGRESS:500000:10.5",
+            &tx,
+            &mut total,
+            &mut last,
+            &mut child,
+        )
+        .ok();
+
+        let events = drain(&mut rx);
+        assert_eq!(events.len(), 1);
+        if let FlashEvent::Progress(p, bytes, speed) = &events[0] {
+            assert!((*p - 0.5).abs() < 0.01, "progress should be ~0.5");
+            assert_eq!(*bytes, 500_000);
+            assert!((*speed - 10.5).abs() < 0.01);
+        } else {
+            panic!("expected Progress event, got {:?}", events[0]);
+        }
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn process_line_progress_suppressed_when_delta_too_small() {
+        let (tx, mut rx) = make_channel();
+        let mut total = 1_000_000u64;
+        // Set last_progress close to the new value so the delta < 0.005.
+        let mut last = 0.500f32;
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        // Sending 500001 bytes → progress ≈ 0.500001, delta ≈ 0.000001 < 0.005
+        process_line(
+            "PROGRESS:500001:5.0",
+            &tx,
+            &mut total,
+            &mut last,
+            &mut child,
+        )
+        .ok();
+
+        assert!(
+            drain(&mut rx).is_empty(),
+            "tiny progress delta must be suppressed"
+        );
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn process_line_progress_zero_total_emits_nothing() {
+        let (tx, mut rx) = make_channel();
+        let mut total = 0u64;
+        let mut last = 0.0f32;
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        process_line(
+            "PROGRESS:500000:10.0",
+            &tx,
+            &mut total,
+            &mut last,
+            &mut child,
+        )
+        .ok();
+        assert!(drain(&mut rx).is_empty(), "zero total should emit nothing");
+        let _ = child.wait();
+    }
+
+    // ── process_line: LOG ─────────────────────────────────────────────────────
+
+    #[test]
+    fn process_line_log_sends_log_event() {
+        let (tx, mut rx) = make_channel();
+        let mut total = 1024u64;
+        let mut last = 0.0f32;
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        process_line(
+            "LOG:syncing buffers",
+            &tx,
+            &mut total,
+            &mut last,
+            &mut child,
+        )
+        .ok();
+
+        let events = drain(&mut rx);
+        assert_eq!(events.len(), 1);
+        assert!(
+            matches!(&events[0], FlashEvent::Log(msg) if msg == "syncing buffers"),
+            "got {:?}",
+            events[0]
+        );
+        let _ = child.wait();
+    }
+
+    // ── process_line: ERROR ───────────────────────────────────────────────────
+
+    #[test]
+    fn process_line_error_returns_err_with_message() {
+        let (tx, mut rx) = make_channel();
+        let mut total = 1024u64;
+        let mut last = 0.0f32;
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        let result = process_line(
+            "ERROR:disk write failed",
+            &tx,
+            &mut total,
+            &mut last,
+            &mut child,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "disk write failed");
+        // No events should have been sent for an error line.
+        assert!(drain(&mut rx).is_empty());
+        let _ = child.wait();
+    }
+
+    // ── process_line: UNKNOWN ─────────────────────────────────────────────────
+
+    #[test]
+    fn process_line_unknown_is_silently_ignored() {
+        let (tx, mut rx) = make_channel();
+        let mut total = 1024u64;
+        let mut last = 0.0f32;
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        let result = process_line("some random output", &tx, &mut total, &mut last, &mut child);
+        assert!(result.is_ok());
+        assert!(drain(&mut rx).is_empty());
+        let _ = child.wait();
+    }
+
+    // ── process_line: DD_EXIT ─────────────────────────────────────────────────
+
+    #[test]
+    fn process_line_dd_exit_zero_sends_full_progress_when_not_complete() {
+        let (tx, mut rx) = make_channel();
+        let mut total = 1_000_000u64;
+        let mut last = 0.5f32; // simulate partially done
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        process_line("DD_EXIT:0", &tx, &mut total, &mut last, &mut child).ok();
+
+        let events = drain(&mut rx);
+        assert_eq!(events.len(), 1);
+        assert!(
+            matches!(&events[0], FlashEvent::Progress(p, _, _) if (*p - 1.0).abs() < 0.001),
+            "DD_EXIT:0 should push progress to 1.0"
+        );
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn process_line_dd_exit_zero_skipped_when_already_complete() {
+        let (tx, mut rx) = make_channel();
+        let mut total = 1_000_000u64;
+        let mut last = 1.0f32; // already at 100%
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        process_line("DD_EXIT:0", &tx, &mut total, &mut last, &mut child).ok();
+        assert!(
+            drain(&mut rx).is_empty(),
+            "should not resend full-progress when already at 1.0"
+        );
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn process_line_dd_exit_nonzero_sends_log() {
+        let (tx, mut rx) = make_channel();
+        let mut total = 1_000_000u64;
+        let mut last = 0.0f32;
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+
+        process_line("DD_EXIT:1", &tx, &mut total, &mut last, &mut child).ok();
+
+        let events = drain(&mut rx);
+        assert_eq!(events.len(), 1);
+        assert!(
+            matches!(&events[0], FlashEvent::Log(msg) if msg.contains("1")),
+            "non-zero DD_EXIT should log the exit code"
+        );
+        let _ = child.wait();
+    }
+
+    // ── drain_lines ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn drain_lines_completed_on_stage_done() {
+        let (tx, mut rx) = make_channel();
+        let (line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
+
+        line_tx.send("STAGE:DONE".to_string()).unwrap();
+        drop(line_tx); // close sender so drain_lines can finish
+
+        let mut total = 1024u64;
+        let mut last = 0.0f32;
+        drain_lines(&mut line_rx, &tx, &mut total, &mut last).await;
+
+        let events = drain(&mut rx);
+        assert!(
+            events.iter().any(|e| matches!(e, FlashEvent::Completed)),
+            "STAGE:DONE in drain should emit Completed"
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_lines_error_sends_failed() {
+        let (tx, mut rx) = make_channel();
+        let (line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
+
+        line_tx.send("ERROR:something broke".to_string()).unwrap();
+        drop(line_tx);
+
+        let mut total = 1024u64;
+        let mut last = 0.0f32;
+        drain_lines(&mut line_rx, &tx, &mut total, &mut last).await;
+
+        let events = drain(&mut rx);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, FlashEvent::Failed(msg) if msg == "something broke")),
+            "ERROR in drain should emit Failed"
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_lines_log_forwarded() {
+        let (tx, mut rx) = make_channel();
+        let (line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
+
+        line_tx.send("LOG:flushing caches".to_string()).unwrap();
+        drop(line_tx);
+
+        let mut total = 1024u64;
+        let mut last = 0.0f32;
+        drain_lines(&mut line_rx, &tx, &mut total, &mut last).await;
+
+        let events = drain(&mut rx);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, FlashEvent::Log(m) if m == "flushing caches")),
+            "LOG in drain should be forwarded"
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_lines_progress_forwarded() {
+        let (tx, mut rx) = make_channel();
+        let (line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
+
+        line_tx.send("PROGRESS:512000:8.0".to_string()).unwrap();
+        drop(line_tx);
+
+        let mut total = 1_024_000u64;
+        let mut last = 0.0f32;
+        drain_lines(&mut line_rx, &tx, &mut total, &mut last).await;
+
+        let events = drain(&mut rx);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, FlashEvent::Progress(_, _, _))),
+            "PROGRESS in drain should emit a Progress event"
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_lines_empty_channel_emits_nothing() {
+        let (tx, mut rx) = make_channel();
+        let (_line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
+        // Do NOT send anything — just drop so the channel is empty.
+        drop(_line_tx);
+
+        let mut total = 1024u64;
+        let mut last = 0.0f32;
+        drain_lines(&mut line_rx, &tx, &mut total, &mut last).await;
+
+        assert!(drain(&mut rx).is_empty());
+    }
+
+    // ── run_flash: validation guards ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn run_flash_missing_image_sends_failed() {
+        let (tx, mut rx) = make_channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        run_flash(
+            PathBuf::from("/nonexistent/image.iso"),
+            PathBuf::from("/dev/null"),
+            cancel,
+            tx,
+        )
+        .await;
+
+        let events = drain(&mut rx);
+        assert!(
+            events.iter().any(|e| matches!(e, FlashEvent::Failed(_))),
+            "missing image must produce a Failed event"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_flash_empty_image_sends_failed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let empty = tmp.path().join("empty.iso");
+        std::fs::write(&empty, b"").unwrap(); // zero bytes
+
+        let (tx, mut rx) = make_channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        run_flash(empty, PathBuf::from("/dev/null"), cancel, tx).await;
+
+        let events = drain(&mut rx);
+        assert!(
+            events.iter().any(|e| matches!(e, FlashEvent::Failed(_))),
+            "empty image must produce a Failed event"
+        );
+    }
+}
