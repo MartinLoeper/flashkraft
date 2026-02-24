@@ -1,6 +1,7 @@
 # flashkraft workspace — task runner
-# Install just: cargo install just
+# Install just:      cargo install just
 # Install git-cliff: cargo install git-cliff
+# Install vhs:       brew install vhs  OR  go install github.com/charmbracelet/vhs@latest
 # Usage: just <task>
 
 # ── Default ───────────────────────────────────────────────────────────────────
@@ -13,6 +14,14 @@ default:
 _check-git-cliff:
     @command -v git-cliff >/dev/null 2>&1 || { \
         echo "❌ git-cliff not found. Install with: cargo install git-cliff"; exit 1; \
+    }
+
+_check-vhs:
+    @command -v vhs >/dev/null 2>&1 || { \
+        echo "❌ vhs not found."; \
+        echo "   macOS:      brew install vhs"; \
+        echo "   Any:        go install github.com/charmbracelet/vhs@latest"; \
+        exit 1; \
     }
 
 # Install all recommended development tools
@@ -102,6 +111,105 @@ clippy:
 # Run all quality checks (fmt, clippy, test) — must pass before a release
 check-all: fmt-check clippy test
     @echo "✅ All checks passed!"
+
+# ── Examples ──────────────────────────────────────────────────────────────────
+
+# Run the basic_usage GUI example
+example-basic:
+    cargo run -p flashkraft-gui --example basic_usage
+
+# Run the custom_theme GUI example
+example-theme:
+    cargo run -p flashkraft-gui --example custom_theme
+
+# Run the fully functional TUI application example
+example-tui:
+    cargo run -p flashkraft-tui --example tui
+
+# Run the headless (no TTY) TUI state-machine demo
+example-tui-headless:
+    cargo run -p flashkraft-tui --example headless_demo
+
+# Run the detect_drives core example
+example-drives:
+    cargo run -p flashkraft-core --example detect_drives
+
+# Run the constraints_demo core example
+example-constraints:
+    cargo run -p flashkraft-core --example constraints_demo
+
+# Run the flash_writer_demo core example
+example-flash-writer:
+    cargo run -p flashkraft-core --example flash_writer_demo
+
+# ── VHS Demo GIFs ─────────────────────────────────────────────────────────────
+
+GUI_VHS := "crates/flashkraft-gui/examples/vhs"
+TUI_VHS := "crates/flashkraft-tui/examples/vhs"
+GUI_VHS_GENERATED := "crates/flashkraft-gui/examples/vhs/generated"
+TUI_VHS_GENERATED := "crates/flashkraft-tui/examples/vhs/generated"
+
+# Generate all VHS demo GIFs (GUI + TUI)
+vhs-all: vhs-gui vhs-tui
+
+# Generate only the GUI demo GIFs (crates/flashkraft-gui/examples/vhs/generated/)
+vhs-gui: _check-vhs
+    @mkdir -p {{GUI_VHS_GENERATED}}
+    @echo "╔════════════════════════════════════════════╗"
+    @echo "║   GUI Tapes (Iced desktop)                ║"
+    @echo "╚════════════════════════════════════════════╝"
+    @for tape in {{GUI_VHS}}/*.tape; do \
+        echo "▶  $tape"; \
+        vhs "$tape" || echo "❌ Failed: $tape"; \
+    done
+    @echo "✅ GUI demos done → {{GUI_VHS_GENERATED}}/"
+
+# Generate only the TUI demo GIFs (crates/flashkraft-tui/examples/vhs/generated/)
+vhs-tui: _check-vhs
+    @mkdir -p {{TUI_VHS_GENERATED}}
+    @echo "╔════════════════════════════════════════════╗"
+    @echo "║   TUI Tapes (Ratatui terminal)            ║"
+    @echo "╚════════════════════════════════════════════╝"
+    @for tape in {{TUI_VHS}}/*.tape; do \
+        echo "▶  $tape"; \
+        vhs "$tape" || echo "❌ Failed: $tape"; \
+    done
+    @echo "✅ TUI demos done → {{TUI_VHS_GENERATED}}/"
+
+# Render a single tape by name, e.g.: just vhs-tape tui-demo-workflow
+vhs-tape name: _check-vhs
+    @if [ -f "{{GUI_VHS}}/{{name}}.tape" ]; then \
+        echo "▶  {{GUI_VHS}}/{{name}}.tape"; \
+        vhs "{{GUI_VHS}}/{{name}}.tape" && echo "✅ Done."; \
+    elif [ -f "{{TUI_VHS}}/{{name}}.tape" ]; then \
+        echo "▶  {{TUI_VHS}}/{{name}}.tape"; \
+        vhs "{{TUI_VHS}}/{{name}}.tape" && echo "✅ Done."; \
+    else \
+        echo "❌ Tape not found: {{name}}.tape"; \
+        echo ""; \
+        just vhs-list; \
+        exit 1; \
+    fi
+
+# List all available VHS tapes and any already-generated GIFs
+vhs-list:
+    @echo "GUI tapes  →  {{GUI_VHS}}/"
+    @ls {{GUI_VHS}}/*.tape | sed 's|.*/||; s|\.tape||' | sed 's/^/  /'
+    @echo "GUI generated  →  {{GUI_VHS_GENERATED}}/"
+    @ls {{GUI_VHS_GENERATED}}/*.gif 2>/dev/null | sed 's|.*/||' | sed 's/^/  /' || echo "  (none yet)"
+    @echo ""
+    @echo "TUI tapes  →  {{TUI_VHS}}/"
+    @ls {{TUI_VHS}}/*.tape | sed 's|.*/||; s|\.tape||' | sed 's/^/  /'
+    @echo "TUI generated  →  {{TUI_VHS_GENERATED}}/"
+    @ls {{TUI_VHS_GENERATED}}/*.gif 2>/dev/null | sed 's|.*/||' | sed 's/^/  /' || echo "  (none yet)"
+
+# Pull GIF files from Git LFS (run once after a fresh clone)
+lfs-pull:
+    @command -v git-lfs >/dev/null 2>&1 || { \
+        echo "❌ git-lfs not found. Install with: brew install git-lfs"; exit 1; \
+    }
+    git lfs pull
+    @echo "✅ LFS objects pulled."
 
 # ── Documentation ─────────────────────────────────────────────────────────────
 

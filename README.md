@@ -1,4 +1,4 @@
-# FlashKraft 🗲
+# FlashKraft ⚡
 
 [![Crates.io](https://img.shields.io/crates/v/flashkraft)](https://crates.io/crates/flashkraft)
 [![Documentation](https://docs.rs/flashkraft/badge.svg)](https://docs.rs/flashkraft)
@@ -6,42 +6,75 @@
 [![Release](https://github.com/sorinirimies/flashkraft/actions/workflows/release.yml/badge.svg)](https://github.com/sorinirimies/flashkraft/actions/workflows/release.yml)
 [![CI](https://github.com/sorinirimies/flashkraft/actions/workflows/ci.yml/badge.svg)](https://github.com/sorinirimies/flashkraft/actions/workflows/ci.yml)
 
-A lightning-fast, lightweight OS image writer built entirely in Rust with the [Iced](https://github.com/iced-rs/iced) GUI framework. No Electron, no shell scripts, no external tooling — pure Rust from UI to block device.
+A lightning-fast, lightweight OS image writer built entirely in Rust. Choose your interface:
+
+| | `flashkraft` (GUI) | `flashkraft-tui` (TUI) |
+|---|---|---|
+| Framework | [Iced](https://github.com/iced-rs/iced) 0.13 | [Ratatui](https://github.com/ratatui-org/ratatui) 0.30 |
+| Input | Mouse + keyboard | Keyboard only |
+| Themes | 21 built-in Iced themes | Fixed brand palette |
+| Best for | Desktop users | SSH / headless / minimal setups |
+
+No Electron, no shell scripts, no external tooling — pure Rust from UI to block device.
 
 ## Preview
 
+### GUI (Iced desktop)
+
 ![flashkraft_demo](https://github.com/user-attachments/assets/76549cb3-a65e-4a99-b638-1aac6d50c553)
 
+### TUI (Ratatui terminal)
+
+![tui-demo-workflow](crates/flashkraft-tui/examples/vhs/generated/tui-demo-workflow.gif)
+
+> **Note:** Demo GIFs are stored with [Git LFS](https://git-lfs.github.com/).
+> Run `git lfs install && git lfs pull` after cloning if the images appear broken.
+
 ## Features
+
+### Shared (both interfaces)
 
 - ⚡ **Pure-Rust flash engine** — no `dd`, no bash scripts; writes directly to the block device using `std::fs`, `nix` ioctls, and `sha2` verification
 - 🔒 **Write verification** — SHA-256 of the source image is compared against a read-back of the device after every flash
 - 🔄 **Partition table refresh** — `BLKRRPART` ioctl ensures the kernel picks up the new partition layout immediately, so the USB boots first time
 - 🧲 **Lazy unmount** — all partitions are cleanly detached via `umount2(MNT_DETACH)` before writing
-- 🎨 **21 beautiful Iced themes** to choose from, persisted across sessions
 - 📁 **Multiple image formats** — ISO, IMG, DMG, ZIP, and more
 - 💾 **Automatic drive detection** — removable drives refreshed on demand
 - 🛡️ **Safe drive selection** — system drives flagged, oversized drives warned, read-only drives blocked
 - 🎯 **Real-time progress** — stage-aware progress bar with live MB/s speed display
 - 🪶 **Tiny footprint** — Rust-compiled binary, C-like memory usage, no Electron runtime
 
+### GUI extras
+
+- 🎨 **21 beautiful Iced themes** to choose from, persisted across sessions via `sled`
+- 🖱️ **Native file picker** — powered by `rfd` for OS-native open dialogs
+
+### TUI extras
+
+- ⌨️ **Fully keyboard-driven** — vim-style `j/k` navigation, `b`/`Esc` to go back
+- 📂 **Built-in file explorer** — browse and pick ISO files without leaving the terminal (`Tab` / `Ctrl+F`)
+- 📊 **Pie-chart drive overview** — storage breakdown rendered inline using `tui-piechart`
+- ✅ **Checkbox confirmation screen** — safety checklist before every flash via `tui-checkbox`
+- 🎚️ **Slider progress bar** — smooth flash-progress widget via `tui-slider`
+- 🖥️ **Works over SSH** — no display server required
+
 ## How flashing works
 
-FlashKraft uses a **self-elevating pure-Rust helper** pattern. When you click Flash:
+FlashKraft uses a **self-elevating pure-Rust helper** pattern. When you click/confirm Flash:
 
 ```
-Main process (GUI)
-  └─ pkexec /path/to/flashkraft --flash-helper <image> <device>
+Main process (GUI or TUI)
+  └─ pkexec /path/to/flashkraft[−tui] --flash-helper <image> <device>
        └─ Runs as root, pure Rust, no shell
             1. UNMOUNTING  — reads /proc/mounts, calls umount2(MNT_DETACH) per partition
             2. WRITING     — streams image → block device in 4 MiB chunks, emits PROGRESS lines
             3. SYNCING     — fsync(fd) + sync() to flush all kernel write-back caches
             4. REREADING   — BLKRRPART ioctl so the kernel sees the new partition table
             5. VERIFYING   — SHA-256(image) == SHA-256(device[0..image_size])
-            6. DONE        — GUI shows success
+            6. DONE        — UI shows success
 ```
 
-The same binary is re-executed with elevated privileges via `pkexec` — no separate helper binary needs to be installed. All output (progress, logs, errors) is written to stdout as structured lines that the GUI reads in real time.
+The same binary is re-executed with elevated privileges via `pkexec` — no separate helper binary needs to be installed. All output (progress, logs, errors) is written to stdout as structured lines that the UI reads in real time.
 
 ### Why not `dd`?
 
@@ -54,16 +87,9 @@ The same binary is re-executed with elevated privileges via `pkexec` — no sepa
 | Partition table refresh | ✗ not done | ✓ `BLKRRPART` ioctl |
 | Error reporting | ✗ exit code only | ✓ `ERROR:<message>` on every failure path |
 
-### Why not `nusb` or `usbd_bulk_only_transport`?
+## The Elm Architecture (GUI)
 
-USB flash drives are **USB Mass Storage Class** devices. The kernel's `usb-storage` driver speaks the BOT + SCSI protocol to them and exposes the result as a plain block device (`/dev/sdX`). Writing an OS image needs the **block device interface**, not USB protocol programming.
-
-- `nusb` — USB protocol library (user-space driver for *non-standard* USB devices; MSC is explicitly out of scope per its own docs)
-- `usbd_bulk_only_transport` — embedded device-side firmware crate (runs *on* the USB device, not the host)
-
-## The Elm Architecture
-
-FlashKraft is built using **The Elm Architecture (TEA)**, which Iced embraces as its natural pattern for interactive applications.
+The GUI crate is built using **The Elm Architecture (TEA)**, which Iced embraces as its natural pattern for interactive applications.
 
 ### Core Concepts
 
@@ -83,20 +109,15 @@ struct FlashKraft {
 }
 ```
 
-State is immutable between `update` calls — all changes flow through messages.
-
 #### 2. Messages
 
 ```rust
 enum Message {
-    // User interactions
     SelectImageClicked,
     TargetDriveClicked(DriveInfo),
     FlashClicked,
     CancelFlash,
     ResetClicked,
-
-    // Async results
     ImageSelected(Option<PathBuf>),
     DrivesRefreshed(Vec<DriveInfo>),
     FlashProgressUpdate(f32, u64, f32),
@@ -105,37 +126,7 @@ enum Message {
 }
 ```
 
-#### 3. Update Logic
-
-```rust
-fn update(&mut self, message: Message) -> Task<Message> {
-    match message {
-        Message::FlashClicked => {
-            // Reset cancel token, activate subscription
-            state.flash_cancel_token = Arc::new(AtomicBool::new(false));
-            state.flashing_active = true;
-            Task::none()
-        }
-        Message::FlashProgressUpdate(progress, bytes, speed) => {
-            state.flash_progress = Some(progress);
-            state.flash_bytes_written = bytes;
-            state.flash_speed_mb_s = speed;
-            Task::none()
-        }
-        // ...
-    }
-}
-```
-
-#### 4. View Logic
-
-Pure function from state to UI — no side effects, no mutation.
-
-#### 5. Subscriptions
-
-When `flashing_active` is true, a subscription spawns the privileged helper and streams [`FlashProgress`] events back to `update`.
-
-### Data Flow
+#### 3. Data Flow
 
 ```
 User Action → Message → Update → State
@@ -147,12 +138,61 @@ User Action → Message → Update → State
                                              View → UI
 ```
 
+## TUI Screen Flow
+
+The TUI is a multi-screen application driven entirely by keyboard input:
+
+```
+SelectImage ──(Enter/confirm)──► SelectDrive ──(Enter)──► DriveInfo
+     ▲                                ▲                        │
+     │  (Esc/b)                       │  (Esc/b)           (f/Enter)
+     │                                │                        ▼
+     │                           SelectDrive            ConfirmFlash
+     │                                                       │
+     │                                                   (y — flash)
+     │                                                       ▼
+     │                                                   Flashing
+     │                                                  (c — cancel)
+     │                                                       │
+     └──────────────────(r — reset)────────── Complete / Error
+```
+
+### TUI Key Bindings
+
+| Screen | Key | Action |
+|--------|-----|--------|
+| SelectImage | `i` / `Enter` | Enter editing mode |
+| SelectImage | `Tab` / `Ctrl+F` | Open built-in file browser |
+| SelectImage | `Esc` / `q` | Quit |
+| BrowseImage | `j` / `↓` | Move cursor down |
+| BrowseImage | `k` / `↑` | Move cursor up |
+| BrowseImage | `Enter` | Descend into directory / select file |
+| BrowseImage | `Backspace` | Ascend to parent directory |
+| BrowseImage | `Esc` / `q` | Dismiss without selecting |
+| SelectDrive | `j` / `↓` | Scroll drive list down |
+| SelectDrive | `k` / `↑` | Scroll drive list up |
+| SelectDrive | `Enter` / `Space` | Confirm selected drive |
+| SelectDrive | `r` / `F5` | Refresh drive list |
+| SelectDrive | `Esc` / `b` | Go back |
+| DriveInfo | `f` / `Enter` | Advance to ConfirmFlash |
+| DriveInfo | `Esc` / `b` | Go back |
+| ConfirmFlash | `y` / `Y` | Begin flashing |
+| ConfirmFlash | `n` / `Esc` / `b` | Go back |
+| Flashing | `c` / `Esc` | Cancel flash |
+| Complete | `r` / `R` | Reset to start |
+| Complete | `q` / `Esc` | Quit |
+| Error | `r` / `Enter` | Reset to start |
+| Error | `q` / `Esc` | Quit |
+| Any | `Ctrl+C` / `Ctrl+Q` | Force quit |
+
 ## Building and Running
 
 ### Prerequisites
 
 - Rust 1.70 or later
 - `pkexec` (part of `polkit`, available on all major Linux distributions)
+- For GUI: a running display server (X11 or Wayland)
+- For TUI: any terminal emulator (works over SSH)
 
 ### Build
 
@@ -160,34 +200,49 @@ User Action → Message → Update → State
 git clone https://github.com/sorinirimies/flashkraft.git
 cd flashkraft
 
+# Build everything
 cargo build --release
-cargo run --release
+
+# Build only the GUI
+cargo build --release --bin flashkraft
+
+# Build only the TUI
+cargo build --release --bin flashkraft-tui
+```
+
+### Run
+
+```bash
+# Launch the GUI
+cargo run --bin flashkraft
+
+# Launch the TUI
+cargo run --bin flashkraft-tui
 ```
 
 ### Development
 
 ```bash
-# Debug build (faster compilation)
-cargo run
+# Debug builds (faster compilation)
+cargo run --bin flashkraft
+cargo run --bin flashkraft-tui
 
-# Run tests
+# Run all tests across the workspace
 cargo test
 
 # Check without building
-cargo check
+cargo check --workspace
+
+# Lint
+cargo clippy --workspace
 
 # With backtraces
-RUST_BACKTRACE=1 cargo run
-```
-
-### Examples
-
-```bash
-cargo run --example basic_usage   # Full application
-cargo run --example custom_theme  # Theme showcase
+RUST_BACKTRACE=1 cargo run --bin flashkraft-tui
 ```
 
 ## Usage
+
+### GUI
 
 1. **Select Image** — click the `+` button and choose an ISO, IMG, or DMG file
 2. **Select Drive** — pick the target USB or SD card from the detected drives list
@@ -195,93 +250,211 @@ cargo run --example custom_theme  # Theme showcase
 4. **Wait** — the progress bar shows live stage, bytes written, and MB/s
 5. **Done** — verification passes automatically; safely remove the drive
 
+### TUI
+
+1. **Select Image** — press `i` to start typing a path, or `Tab`/`Ctrl+F` to open the file browser
+2. **Select Drive** — use `j`/`k` to scroll, `r` to refresh, `Enter` to confirm
+3. **Review Drive Info** — inspect the storage pie-chart, then press `f` to proceed
+4. **Confirm** — read the safety checklist and press `y` to flash, or `b` to go back
+5. **Wait** — the slider progress bar shows live stage, bytes written, and MB/s
+6. **Done** — press `r` to reset or `q` to quit
+
 ## Project Structure
 
+This is a [Cargo workspace](https://doc.rust-lang.org/cargo/reference/workspaces.html) with three crates:
+
 ```
-flashkraft/
-├── src/
-│   ├── main.rs                       # Entry point; detects --flash-helper mode
-│   ├── lib.rs                        # Library root
-│   ├── view.rs                       # View orchestration
-│   ├── core/                         # Core application logic (Elm Architecture)
-│   │   ├── mod.rs
-│   │   ├── state.rs                  # Application state (Model) + Elm methods
-│   │   ├── message.rs                # All message variants
-│   │   ├── update.rs                 # State transition logic
-│   │   ├── storage.rs                # Persistent theme storage (sled)
-│   │   ├── flash_helper.rs           # ★ Pure-Rust privileged flash engine
-│   │   ├── flash_writer.rs           # ★ Protocol types, line parser, speed normaliser
-│   │   ├── flash_subscription.rs     # ★ Iced Subscription — spawns helper, streams events
-│   │   └── commands/
-│   │       ├── mod.rs
-│   │       ├── file_selection.rs     # Async native file dialog (rfd)
-│   │       └── drive_detection.rs    # Async drive enumeration (/sys/block)
-│   ├── domain/                       # Domain models
-│   │   ├── mod.rs
-│   │   ├── constraints.rs            # Drive/image compatibility checks
-│   │   ├── drive_info.rs
-│   │   └── image_info.rs
-│   ├── components/                   # UI components
-│   │   ├── animated_progress.rs
-│   │   ├── device_selector.rs
-│   │   ├── header.rs
-│   │   ├── progress_line.rs
-│   │   ├── selection_panels.rs
-│   │   ├── status_views.rs
-│   │   ├── step_indicators.rs
-│   │   └── theme_selector.rs
-│   └── utils/
-│       ├── icons_bootstrap_mapper.rs
-│       └── logger.rs                 # debug_log!, flash_debug!, status_log! macros
-├── examples/
-├── .github/workflows/
-│   ├── ci.yml
-│   └── release.yml
-├── Cargo.toml
-├── CHANGELOG.md
-└── LICENSE
+flashkraft/                              ← workspace root
+├── Cargo.toml                           ← workspace manifest (shared dep versions)
+│
+├── crates/
+│   │
+│   ├── flashkraft-core/                 ★ shared logic — no GUI/TUI deps
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── flash_helper.rs          ★ privileged flash pipeline (pkexec)
+│   │       ├── flash_writer.rs          ★ wire-protocol parser & speed normaliser
+│   │       ├── domain/
+│   │       │   ├── drive_info.rs
+│   │       │   ├── image_info.rs
+│   │       │   └── constraints.rs       drive/image compatibility checks
+│   │       ├── commands/
+│   │       │   └── drive_detection.rs   async /sys/block enumeration
+│   │       └── utils/
+│   │           └── logger.rs            debug_log!, flash_debug!, status_log! macros
+│   │
+│   ├── flashkraft-gui/                  Iced desktop application
+│   │   ├── examples/
+│   │   │   ├── basic_usage.rs
+│   │   │   ├── custom_theme.rs
+│   │   │   └── vhs/                    GUI VHS tapes
+│   │   │       ├── demo-basic.tape
+│   │   │       ├── demo-workflow.tape
+│   │   │       ├── demo-themes.tape
+│   │   │       ├── ...
+│   │   │       └── generated/          output GIFs (Git LFS, gitignored source)
+│   │   └── src/
+│   │       ├── main.rs                  entry point + --flash-helper dispatch
+│   │       ├── lib.rs
+│   │       ├── view.rs                  view orchestration
+│   │       ├── core/                    Elm Architecture
+│   │       │   ├── state.rs             Model + TEA methods
+│   │       │   ├── message.rs           all Message variants
+│   │       │   ├── update.rs            state transition logic
+│   │       │   ├── storage.rs           sled-backed theme persistence
+│   │       │   ├── flash_subscription.rs Iced Subscription — streams FlashProgress
+│   │       │   └── commands/
+│   │       │       └── file_selection.rs async rfd file dialog
+│   │       └── components/              UI widgets
+│   │           ├── animated_progress.rs
+│   │           ├── device_selector.rs
+│   │           ├── header.rs
+│   │           ├── progress_line.rs
+│   │           ├── selection_panels.rs
+│   │           ├── status_views.rs
+│   │           ├── step_indicators.rs
+│   │           └── theme_selector.rs
+│   │
+│   └── flashkraft-tui/                  Ratatui terminal application
+│       ├── examples/
+│       │   ├── headless_demo.rs
+│   │   └── vhs/                    TUI VHS tapes
+│   │       ├── tui-demo-overview.tape
+│   │       ├── tui-demo-navigation.tape
+│   │       ├── tui-demo-file-browser.tape
+│   │       ├── tui-demo-workflow.tape
+│   │       └── generated/          output GIFs (Git LFS, gitignored source)
+│       └── src/
+│           ├── main.rs                  entry point + --flash-helper dispatch
+│           ├── lib.rs
+│           ├── tui/
+│           │   ├── app.rs               App state + all screen transitions
+│           │   ├── ui.rs                ratatui Frame rendering (all screens)
+│           │   ├── events.rs            keyboard event handler per screen
+│           │   ├── flash_runner.rs      async pkexec supervisor + line parser
+│           │   └── mod.rs
+│           └── file_explorer/
+│               └── mod.rs              built-in keyboard-driven file browser
+│
+├── scripts/
+│   └── bump_version.sh
+│
+└── .github/workflows/
+    ├── ci.yml
+    └── release.yml
 ```
 
 Items marked ★ form the flash pipeline and are described in detail above.
 
 ## Dependencies
 
+### `flashkraft-core`
+
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| `iced` | 0.13 | Cross-platform GUI framework (Elm Architecture) |
-| `iced_fonts` | 0.1 | Bootstrap icon font |
-| `rfd` | 0.15 | Native file/folder dialogs |
 | `sysinfo` | 0.30 | Drive enumeration |
 | `nix` | 0.29 | `umount2`, `BLKRRPART` ioctl, `fsync` |
 | `sha2` | 0.10 | SHA-256 write verification |
-| `futures` | 0.3 | Async channel primitives for the subscription |
-| `futures-timer` | 3.0 | Non-blocking delay in the subscription poll loop |
-| `sled` | 0.34 | Embedded key-value store for theme persistence |
+| `tokio` | 1 | Async runtime |
+| `futures` / `futures-timer` | 0.3 / 3.0 | Async channel primitives |
+| `sled` | 0.34 | Embedded key-value store |
 | `dirs` | 5.0 | XDG data directory resolution |
+| `anyhow` | 1 | Error handling |
+
+### `flashkraft-gui`
+
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| `iced` | 0.13 | Cross-platform GUI framework (Elm Architecture) |
+| `iced_aw` | 0.12 | Additional Iced widgets |
+| `iced_fonts` | 0.1 | Bootstrap icon font |
+| `rfd` | 0.15 | Native file/folder dialogs |
+
+### `flashkraft-tui`
+
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| `ratatui` | 0.30 | Terminal UI framework |
+| `crossterm` | 0.29 | Cross-platform terminal control |
+| `tui-slider` | git | Flash-progress slider widget |
+| `tui-piechart` | git | Drive storage pie-chart widget |
+| `tui-checkbox` | git | Drive-list and confirm-screen checkboxes |
 
 ## Architecture Highlights
 
+- **Shared core crate** — `flashkraft-core` contains all flash logic; both UIs are thin frontends over the same engine
 - **Pure-Rust flash engine** — zero shell scripts or external binaries
-- **94 unit tests** — all passing; covers parsing, pipeline validation, I/O round-trips, SHA-256 hashing, partition name detection, and protocol simulation
-- **5-stage verified pipeline** — Unmount → Write → Sync → BLKRRPART → SHA-256 verify
-- **Self-elevating helper** — single binary, no install-time setup beyond `polkit`
-- **Elm Architecture** — unidirectional data flow, pure update/view functions
-- **0 warnings** — clean `cargo build` and `cargo test`
+- **Self-elevating helper** — single binary per UI, no install-time setup beyond `polkit`
+- **Elm Architecture (GUI)** — unidirectional data flow, pure `update`/`view` functions
+- **Screen-based state machine (TUI)** — each `AppScreen` variant owns its event handler and render function
+- **0 warnings** — clean `cargo build --workspace` and `cargo test --workspace`
+
+## Demo GIFs & Git LFS
+
+All generated GIFs under `examples/vhs/` are tracked by [Git LFS](https://git-lfs.github.com/) (see `.gitattributes`).
+
+```bash
+# One-time setup after cloning
+git lfs install && git lfs pull   # or: just lfs-pull
+
+# Regenerate all demos (requires vhs installed)
+just vhs-all
+
+# Regenerate TUI demos only  (output: crates/flashkraft-tui/examples/vhs/)
+just vhs-tui
+
+# Regenerate GUI demos only  (output: crates/flashkraft-gui/examples/vhs/)
+just vhs-gui
+
+# Render a single tape
+just vhs-tape tui-demo-workflow
+just vhs-tape demo-basic
+
+# List all available tapes
+just vhs-list
+```
+
+Install VHS:
+
+```bash
+brew install vhs                                   # macOS
+go install github.com/charmbracelet/vhs@latest    # any platform
+```
+
+To run Rust examples from the workspace root:
+
+```bash
+# Core examples
+cargo run -p flashkraft-core --example detect_drives
+cargo run -p flashkraft-core --example constraints_demo
+cargo run -p flashkraft-core --example flash_writer_demo
+
+# GUI examples  (crates/flashkraft-gui/examples/)
+cargo run -p flashkraft-gui --example basic_usage
+cargo run -p flashkraft-gui --example custom_theme
+
+# TUI examples  (crates/flashkraft-tui/examples/)
+cargo run -p flashkraft-tui --example headless_demo
+```
 
 ## Contributing
 
 Contributions are welcome! Please:
 
-1. Follow the Elm Architecture pattern — all state changes via `update`
-2. Keep functions pure where possible
-3. Add unit tests for any new logic, especially in `flash_helper.rs` and `flash_writer.rs`
-4. Run `cargo test` and `cargo clippy` before opening a PR
+1. Keep all flash logic in `flashkraft-core` — neither the GUI nor the TUI crate should contain flash pipeline code
+2. Follow the Elm Architecture pattern in the GUI — all state changes via `update`
+3. Follow the screen-state-machine pattern in the TUI — screen transitions via `App` methods
+4. Keep functions pure where possible
+5. Add unit tests for any new logic, especially in `flash_helper.rs`, `flash_writer.rs`, `app.rs`, and `events.rs`
+6. Run `cargo test --workspace` and `cargo clippy --workspace` before opening a PR
 
 ## Learning Resources
 
 - [Iced Documentation](https://docs.rs/iced/)
+- [Ratatui Documentation](https://docs.rs/ratatui/)
 - [The Elm Architecture Guide](https://guide.elm-lang.org/architecture/)
 - [Iced Examples](https://github.com/iced-rs/iced/tree/master/examples)
+- [Ratatui Examples](https://github.com/ratatui-org/ratatui/tree/main/examples)
 - [The Rust Book](https://doc.rust-lang.org/book/)
 - [nix crate](https://docs.rs/nix/) — POSIX ioctls and syscalls from Rust
 
@@ -291,6 +464,8 @@ MIT — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- Built with [Iced](https://github.com/iced-rs/iced)
+- GUI built with [Iced](https://github.com/iced-rs/iced)
+- TUI built with [Ratatui](https://github.com/ratatui-org/ratatui)
 - Follows [The Elm Architecture](https://guide.elm-lang.org/architecture/)
 - Flash pipeline design inspired by [Balena Etcher](https://github.com/balena-io/etcher)
+- Terminal widgets: [tui-slider](https://github.com/sorinirimies/tui-slider), [tui-piechart](https://github.com/sorinirimies/tui-piechart), [tui-checkbox](https://github.com/sorinirimies/tui-checkbox)
