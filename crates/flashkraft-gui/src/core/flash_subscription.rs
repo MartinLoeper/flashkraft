@@ -13,7 +13,7 @@
 //! ```
 //!
 //! `main.rs` detects `--flash-helper` before touching any GUI code and
-//! dispatches to [`crate::core::flash_helper::run`].  The helper writes all
+//! dispatches to [`flashkraft_core::flash_helper::run`].  The helper writes all
 //! output — progress, stage transitions, logs, and errors — to **stdout**.
 //! This subscription spawns a single blocking reader thread that ships those
 //! lines to an async channel, where the main loop parses them and forwards

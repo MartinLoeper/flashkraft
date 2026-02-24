@@ -1,7 +1,7 @@
 //! TUI Flash Runner
 //!
 //! Provides a Tokio-task-based flash operation that mirrors the logic in
-//! [`crate::core::flash_subscription`] but uses [`tokio::sync::mpsc`] channels
+//! the Iced `flash_subscription` module but uses [`tokio::sync::mpsc`] channels
 //! instead of Iced subscriptions, making it suitable for the Ratatui TUI.
 //!
 //! ## Wire protocol (stdout of the helper process)

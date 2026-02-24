@@ -8,9 +8,10 @@
 //!
 //! ```text
 //! flashkraft_tui
-//! ├── domain   ← re-exported from flashkraft_core::domain
-//! ├── core     ← re-exported from flashkraft_core (commands, flash_writer, …)
-//! └── tui      ← Ratatui front-end (app / events / flash_runner / ui)
+//! ├── domain        ← re-exported from flashkraft_core::domain
+//! ├── core          ← re-exported from flashkraft_core (commands, flash_writer, …)
+//! ├── tui           ← Ratatui front-end (app / events / flash_runner / ui)
+//! └── file_explorer ← self-contained file-browser widget
 //! ```
 
 // ── Core re-exports ───────────────────────────────────────────────────────────
@@ -35,9 +36,12 @@ pub use flashkraft_core::domain;
 // ── TUI submodules ────────────────────────────────────────────────────────────
 
 /// Ratatui front-end — app state, event handling, flash runner, UI rendering.
+///
+/// Submodules: `app` (state machine), `events` (key handling),
+/// `flash_runner` (background flash task), `ui` (frame rendering).
 pub mod tui;
 
-/// Self-contained file-explorer widget for Ratatui.
+/// Self-contained file-explorer widget for Ratatui (the TUI framework).
 ///
 /// This module has **no flashkraft-specific dependencies** — only `ratatui`,
 /// `crossterm`, and the standard library — so it can be extracted and

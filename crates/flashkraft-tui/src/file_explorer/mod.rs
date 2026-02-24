@@ -1,6 +1,6 @@
 //! # ratatui-file-explorer
 //!
-//! A self-contained, reusable file-browser widget for [Ratatui].
+//! A self-contained, reusable file-browser widget for Ratatui.
 //!
 //! ## Design goals
 //!

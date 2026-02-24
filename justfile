@@ -15,16 +15,10 @@ _check-git-cliff:
         echo "❌ git-cliff not found. Install with: cargo install git-cliff"; exit 1; \
     }
 
-_check-cargo-edit:
-    @command -v cargo-set-version >/dev/null 2>&1 || { \
-        echo "❌ cargo-edit not found. Install with: cargo install cargo-edit"; exit 1; \
-    }
-
 # Install all recommended development tools
 install-tools:
     @echo "Installing development tools…"
-    @command -v git-cliff  >/dev/null 2>&1 || cargo install git-cliff
-    @command -v cargo-edit >/dev/null 2>&1 || cargo install cargo-edit
+    @command -v git-cliff >/dev/null 2>&1 || cargo install git-cliff
     @echo "✅ All tools installed!"
 
 # ── Build ─────────────────────────────────────────────────────────────────────
@@ -145,8 +139,20 @@ changelog-preview: _check-git-cliff
 #
 # Runs fmt → clippy → test → changelog → commit → tag, then shows push hints.
 
+# Bump the workspace version, regenerate Cargo.lock + CHANGELOG.md, commit and tag.
+# All three crates (core / gui / tui) share the version via version.workspace = true
+# in their Cargo.toml files — a single source of truth in [workspace.package].
+#
+# Flow:
+#   1. check-all  — fmt-check → clippy → tests (quality gate)
+#   2. bump_version.sh — updates Cargo.toml, Cargo.lock, CHANGELOG.md, commits, tags
+#
+# After this completes, push with one of:
+#   just push-release-all   (both remotes)
+#   git push origin main && git push origin v<version>
 bump version: check-all _check-git-cliff
     @echo "Bumping workspace version to {{version}}…"
+    @echo "  All crates inherit the version via version.workspace = true"
     @./scripts/bump_version.sh {{version}}
 
 # ── Publish (crates.io) ───────────────────────────────────────────────────────
@@ -183,6 +189,17 @@ publish-tui:
 # Publish all three in the correct dependency order
 publish: publish-core publish-gui publish-tui
     @echo "✅ All crates published to crates.io!"
+
+# Show what would be released without making any changes
+release-preview: _check-git-cliff
+    @echo "Current version: $(just version)"
+    @echo ""
+    @echo "Unreleased commits:"
+    @git-cliff --unreleased
+    @echo ""
+    @echo "Crate versions (all must match):"
+    @grep -A5 '^\[workspace\.package\]' Cargo.toml | grep '^version'
+    @grep 'version\.workspace' crates/flashkraft-core/Cargo.toml crates/flashkraft-gui/Cargo.toml crates/flashkraft-tui/Cargo.toml
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 
@@ -253,23 +270,34 @@ push-tags-all:
     @echo "✅ Tags pushed to both remotes!"
 
 # ── Release workflows ─────────────────────────────────────────────────────────
-# These combine bump + push so the CI release workflow fires automatically.
+# Full release flow (quality-gate → bump → push → CI triggers build & publish):
+#
+#   just release-preview          # see unreleased commits and current version
+#   just release 0.5.0            # bump + push to GitHub  → CI fires
+#   just release-all 0.5.0        # bump + push to GitHub + Gitea → CI fires
+#
+# Version is shared across all three crates via version.workspace = true —
+# bumping [workspace.package] in Cargo.toml is the single change needed.
+#
+# If you want to bump locally first and push later:
+#   just bump 0.5.0               # runs quality-gate, commits, tags locally
+#   just push-release-all         # push branch + tags to all remotes
 
-# Release to GitHub only: bump, commit, tag, push branch + tag
+# Bump, commit, tag, then push to GitHub — CI release workflow fires on the tag.
 release version: (bump version)
     @echo "Pushing release v{{version}} to GitHub…"
     git push origin main
     git push origin "v{{version}}"
-    @echo "✅ Release v{{version}} live on GitHub — CI will build & publish."
+    @echo "✅ Release v{{version}} pushed to GitHub — CI will build binaries & publish to crates.io."
 
-# Release to Gitea only
+# Bump, commit, tag, then push to Gitea only.
 release-gitea version: (bump version)
     @echo "Pushing release v{{version}} to Gitea…"
     git push gitea main
     git push gitea "v{{version}}"
     @echo "✅ Release v{{version}} live on Gitea."
 
-# Release to both GitHub and Gitea
+# Bump, commit, tag, then push to both GitHub and Gitea.
 release-all version: (bump version)
     @echo "Pushing release v{{version}} to all remotes…"
     git push origin main

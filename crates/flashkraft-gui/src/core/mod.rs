@@ -9,8 +9,8 @@
 //! |--------|----------------|
 //! | [`state`] | Application state (`FlashKraft` struct) + Elm methods |
 //! | [`message`] | All `Message` variants (user events + async results) |
-//! | [`update`] | Pure state-transition function |
-//! | [`flash_subscription`] | Iced [`Subscription`] that streams flash progress |
+//! | [`update()`] | Pure state-transition function |
+//! | [`flash_subscription`] | Iced [`iced::Subscription`] that streams flash progress |
 //! | [`storage`] | Persistent theme preference via `sled` |
 //! | [`commands`] | Async side effects (file picker dialog) |
 //!

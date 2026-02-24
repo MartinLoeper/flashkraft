@@ -1,7 +1,7 @@
 //! TUI Application State
 //!
 //! Defines the complete state machine for the FlashKraft terminal UI.
-//! All state mutations go through [`App::handle_event`] keeping the logic
+//! All state mutations go through `handle_key` keeping the logic
 //! centralised and easy to reason about.
 
 use std::{

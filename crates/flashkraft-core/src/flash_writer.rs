@@ -1,8 +1,8 @@
 //! Flash Writer - Protocol types and parsing for the pure-Rust flash pipeline
 //!
 //! This module provides the shared vocabulary between the privileged flash
-//! helper ([`crate::core::flash_helper`]) and the Iced subscription
-//! ([`crate::core::flash_subscription`]) that drives the UI.
+//! helper ([`crate::flash_helper`]) and the Iced subscription
+//! that drives the UI.
 //!
 //! ## Responsibilities
 //!
@@ -64,8 +64,8 @@ pub struct DdProgress {
 /// The stage currently active in the five-step flash pipeline.
 ///
 /// The helper emits `STAGE:<name>` lines that are parsed into this enum by
-/// [`parse_script_line`].  The UI can use [`FlashStage::to_string`] directly
-/// as a human-readable status message.
+/// [`parse_script_line`].  The UI can use the [`std::fmt::Display`] impl
+/// directly as a human-readable status message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FlashStage {
     /// Initial state before the pipeline starts.
