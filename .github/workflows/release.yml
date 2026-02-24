@@ -4,25 +4,71 @@ on:
   push:
     tags:
       - "v*"
+  # Manual fallback — trigger from the GitHub Actions UI if the tag push
+  # ever silently skips or a re-run is needed without re-pushing the tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.5.0) — must already exist on the repo"
+        required: true
+        default: ""
 
 permissions:
   contents: write
   packages: write
 
+# One release run at a time per tag.  Re-pushing the same tag cancels the
+# previous run instead of queuing a duplicate.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
-# ── Shared apt packages needed to link the Iced GUI on Linux ─────────────────
-# These are referenced by every job that builds flashkraft-gui.
-# TUI jobs (ratatui/crossterm) need none of these.
-
 jobs:
+  # ── 0. Validate trigger ──────────────────────────────────────────────────────
+  # Resolve the effective tag from either a tag push or a manual dispatch, then
+  # validate it matches vX.Y.Z before spending time on any build work.
+  validate:
+    name: Validate tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve and validate tag
+        id: resolve
+        run: |
+          # For a tag push  → github.ref_name is the tag (e.g. "v0.5.0")
+          # For manual runs → the user supplies it via the `tag` input
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+
+          echo "Resolved tag: ${TAG}"
+
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Tag '${TAG}' does not match vX.Y.Z — aborting."
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}"     >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "✅ Tag ${TAG} (version ${VERSION}) is valid."
+
   # ── 1. Quality gate ──────────────────────────────────────────────────────────
   test:
     name: Test & lint
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
 
       - name: Install Linux GUI system libraries
         run: |
@@ -63,7 +109,7 @@ jobs:
   # run in parallel.
   build:
     name: Build — ${{ matrix.target }}
-    needs: test
+    needs: [validate, test]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -97,6 +143,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
 
       # ── System libraries (GUI only) ─────────────────────────────────────────
       - name: Install Linux GUI system libraries
@@ -199,11 +247,12 @@ jobs:
   # ── 3. GitHub Release ────────────────────────────────────────────────────────
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [validate, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.validate.outputs.tag }}
           fetch-depth: 0
 
       - name: Install git-cliff
@@ -211,7 +260,8 @@ jobs:
 
       - name: Generate changelog for this release
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${{ needs.validate.outputs.tag }}"
+          VERSION="${{ needs.validate.outputs.version }}"
           LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
           {
@@ -222,10 +272,10 @@ jobs:
           } > RELEASE_NOTES.md
 
           if [ -n "${LAST_TAG}" ]; then
-            git-cliff --config cliff.toml "${LAST_TAG}".."${GITHUB_REF_NAME}" \
+            git-cliff --config cliff.toml "${LAST_TAG}".."${TAG}" \
               --strip header >> RELEASE_NOTES.md
           else
-            git-cliff --config cliff.toml --tag "${GITHUB_REF_NAME}" \
+            git-cliff --config cliff.toml --tag "${TAG}" \
               --strip header >> RELEASE_NOTES.md
           fi
 
@@ -263,6 +313,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.validate.outputs.tag }}
           body_path: RELEASE_NOTES.md
           files: |
             artifacts/*
@@ -274,16 +325,17 @@ jobs:
 
   # ── 4. Publish to crates.io ──────────────────────────────────────────────────
   # Order matters: core must be published before gui and tui because they
-  # declare it as a dependency.  Each step waits for the index to propagate
-  # (cargo publish --no-verify gives the index a head-start).
+  # declare it as a dependency.  Each step waits for the index to propagate.
   publish:
     name: Publish to crates.io
-    needs: release
+    needs: [validate, release]
     runs-on: ubuntu-latest
     # Only run when the secret is present — skips silently in forks.
     if: ${{ secrets.CRATES_IO_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
 
       - name: Install Linux GUI system libraries
         run: |
