@@ -2,9 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.4.3 - 2026-02-24
+### ➕ Added
+- Add reusable file-explorer widget for Ratatui
+- Add file explorer integration and tests for image selection
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.4.2...v0.4.3
 ## 0.4.2 - 2026-02-20
 ### 📦 Other Changes
 - system showcase
+### 🔧 Chores
+- chore: bump version to 0.4.2
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.4.1...v0.4.2
 ## 0.4.1 - 2026-02-20
 ### ♻️ Refactor
