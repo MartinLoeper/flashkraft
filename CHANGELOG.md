@@ -2,9 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.4.6 - 2026-02-24
+### ➕ Added
+- Add manual release trigger and tag validation to workflow
+### 📦 Other Changes
+- Move VHS demos to crate examples, add Git LFS tracking for GIFs
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.4.5...v0.4.6
 ## 0.4.5 - 2026-02-24
 ### 🔄 Updated
 - Update docs and release scripts for clarity and workflow
+### 🔧 Chores
+- chore: bump version to 0.4.5
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.4.4...v0.4.5
 ## 0.4.4 - 2026-02-24
 ### 🔧 Chores
