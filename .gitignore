@@ -40,6 +40,20 @@ audit.json
 # cargo-geiger
 geiger-report.json
 
+# cargo-llvm-cov
+lcov.info
+*.profraw
+*.profdata
+
+# criterion benchmark output
+criterion/
+
+# cargo-expand output
+expanded.rs
+
+# cargo-outdated / cargo-deny / cargo-udeps
+deny.lock
+
 # =============================================================================
 # Build artifacts
 # =============================================================================
@@ -76,6 +90,10 @@ geiger-report.json
 .*.swo
 Session.vim
 .netrwhist
+
+# ZED — ignore workspace settings but keep the shared rules file
+.zed/*
+!.zed/rules.md
 
 # Emacs
 *#
@@ -128,12 +146,31 @@ tmp/
 temp/
 
 # =============================================================================
+# Persistence — sled embedded databases
+#
+# sled::open("path/name.db") creates a *directory*, not a single file.
+# Guard against any accidental local DB directories in the repo tree.
+# The real DBs live in the OS config dir (~/.config/flashkraft/) so they
+# will never appear here in normal use, but this catches test accidents.
+# =============================================================================
+*.db/
+**/*.db/
+
+# =============================================================================
+# VHS / demo recordings
+# =============================================================================
+
+# Raw VHS tape sources and generated GIFs are tracked:
+#   *.tape  → plain text, committed directly
+#   *.gif   → binary, stored via Git LFS (see .gitattributes)
+#
+# Guard against VHS writing anything else into the working tree:
+*.vhs/
+.vhs/
+
+# =============================================================================
 # Project-specific
 # =============================================================================
 
-# VHS / tape-generated GIFs are tracked via Git LFS (see .gitattributes)
-# — do NOT ignore *.gif here; LFS handles them
-
-# Leftover swap file from this repo
+# Leftover swap file from a previous editing session in this repo
 .is.swp
-{

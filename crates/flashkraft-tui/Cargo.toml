@@ -22,14 +22,18 @@ path = "src/main.rs"
 flashkraft-core = { workspace = true }
 
 # ── TUI framework ─────────────────────────────────────────────────────────────
-ratatui      = { workspace = true }
-crossterm    = { workspace = true }
+ratatui            = { workspace = true }
+crossterm          = { workspace = true }
+tui-file-explorer  = { workspace = true }
 tui-slider   = { workspace = true }
 tui-piechart = { workspace = true }
 tui-checkbox = { workspace = true }
 
 # ── Filesystem helpers ────────────────────────────────────────────────────────
 dirs   = { workspace = true }
+
+# ── Persistence ───────────────────────────────────────────────────────────────
+sled   = { workspace = true }
 
 # ── Async runtime ─────────────────────────────────────────────────────────────
 tokio  = { workspace = true }

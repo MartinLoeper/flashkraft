@@ -25,21 +25,11 @@ use tui_checkbox::Checkbox;
 use tui_piechart::{LegendLayout, LegendPosition, PieChart, PieSlice};
 use tui_slider::{Slider, SliderOrientation, SliderState};
 
-use super::app::{App, AppScreen, InputMode, UsbEntry};
-use crate::file_explorer;
+use super::app::{App, AppScreen, FileOpMode, InputMode, UsbEntry};
+use super::theme::TuiPalette;
+use tui_file_explorer::render_themed;
 
-// ── Palette ──────────────────────────────────────────────────────────────────
-
-const C_BRAND: Color = Color::Rgb(255, 100, 30); // FlashKraft orange
-const C_ACCENT: Color = Color::Rgb(80, 200, 255); // sky blue
-const C_SUCCESS: Color = Color::Rgb(80, 220, 120); // green
-const C_WARN: Color = Color::Rgb(255, 200, 50); // amber
-const C_ERR: Color = Color::Rgb(255, 80, 80); // red
-const C_DIM: Color = Color::Rgb(120, 120, 130); // subtle grey
-const C_FG: Color = Color::White;
-const C_BG: Color = Color::Rgb(18, 18, 26); // near-black
-
-// Pie-chart slice palette
+// ── Pie-chart slice palette (theme-independent) ───────────────────────────────
 const SLICE_COLORS: &[Color] = &[
     Color::Rgb(80, 200, 255),
     Color::Rgb(255, 100, 30),
@@ -60,47 +50,83 @@ fn slice_color(i: usize) -> Color {
 /// Top-level render function — called on every frame from the event loop.
 pub fn render(app: &mut App, frame: &mut Frame) {
     let area = frame.area();
-    frame.render_widget(Block::default().style(Style::default().bg(C_BG)), area);
+    let pal = app.palette().clone();
+    let theme_name = app.current_theme_name().to_string();
+    frame.render_widget(Block::default().style(Style::default().bg(pal.bg)), area);
 
     match app.screen {
-        AppScreen::SelectImage => render_select_image(app, frame, area),
-        AppScreen::BrowseImage => render_browse_image(app, frame, area),
-        AppScreen::SelectDrive => render_select_drive(app, frame, area),
-        AppScreen::DriveInfo => render_drive_info(app, frame, area),
-        AppScreen::ConfirmFlash => render_confirm_flash(app, frame, area),
-        AppScreen::Flashing => render_flashing(app, frame, area),
-        AppScreen::Complete => render_complete(app, frame, area),
-        AppScreen::Error => render_error(app, frame, area),
+        AppScreen::SelectImage => render_select_image(app, frame, area, &pal, &theme_name),
+        AppScreen::BrowseImage => render_browse_image(app, frame, area, &pal, &theme_name),
+        AppScreen::SelectDrive => render_select_drive(app, frame, area, &pal, &theme_name),
+        AppScreen::DriveInfo => render_drive_info(app, frame, area, &pal, &theme_name),
+        AppScreen::ConfirmFlash => render_confirm_flash(app, frame, area, &pal, &theme_name),
+        AppScreen::Flashing => render_flashing(app, frame, area, &pal, &theme_name),
+        AppScreen::Complete => render_complete(app, frame, area, &pal, &theme_name),
+        AppScreen::Error => render_error(app, frame, area, &pal, &theme_name),
+    }
+
+    // The global theme panel floats on top of any screen.
+    if app.show_app_theme_panel {
+        render_app_theme_panel(app, frame, area, &pal);
     }
 }
 
 // ── Shared chrome ─────────────────────────────────────────────────────────────
 
-fn render_header(frame: &mut Frame, area: Rect, subtitle: &str) {
+fn render_header(
+    frame: &mut Frame,
+    area: Rect,
+    subtitle: &str,
+    theme_name: &str,
+    pal: &TuiPalette,
+) {
+    // Split header into [left gap | centre title | right theme badge]
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(20),
+            Constraint::Percentage(60),
+            Constraint::Percentage(20),
+        ])
+        .split(area);
+
+    // Centre: brand title + subtitle
     let title = Line::from(vec![
         Span::styled(
             "⚡ Flash",
-            Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD),
+            Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             "Kraft",
-            Style::default().fg(C_FG).add_modifier(Modifier::BOLD),
+            Style::default().fg(pal.fg).add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
-        Span::styled(subtitle, Style::default().fg(C_DIM)),
+        Span::styled(subtitle, Style::default().fg(pal.dim)),
     ]);
 
-    let para = Paragraph::new(title).alignment(Alignment::Center).block(
-        Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(C_BRAND))
-            .border_type(BorderType::Thick),
-    );
+    // Outer block with the bottom border spans the full width
+    let border_block = Block::default()
+        .borders(Borders::BOTTOM)
+        .border_style(Style::default().fg(pal.brand))
+        .border_type(BorderType::Thick);
+    frame.render_widget(border_block, area);
 
-    frame.render_widget(para, area);
+    // Centre title (no border — sits inside the outer block's visual row)
+    frame.render_widget(Paragraph::new(title).alignment(Alignment::Center), cols[1]);
+
+    // Right: theme badge — "🎨 <ThemeName>"
+    let badge = Paragraph::new(Line::from(vec![
+        Span::styled("🎨 ", Style::default()),
+        Span::styled(
+            theme_name,
+            Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
+        ),
+    ]))
+    .alignment(Alignment::Right);
+    frame.render_widget(badge, cols[2]);
 }
 
-fn render_footer(frame: &mut Frame, area: Rect, hints: &[(&str, &str)]) {
+fn render_footer(frame: &mut Frame, area: Rect, hints: &[(&str, &str)], pal: &TuiPalette) {
     let mut spans: Vec<Span> = Vec::new();
     for (i, (key, desc)) in hints.iter().enumerate() {
         if i > 0 {
@@ -108,10 +134,10 @@ fn render_footer(frame: &mut Frame, area: Rect, hints: &[(&str, &str)]) {
         }
         spans.push(Span::styled(
             format!("[{key}]"),
-            Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
+            Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(*desc, Style::default().fg(C_DIM)));
+        spans.push(Span::styled(*desc, Style::default().fg(pal.dim)));
     }
 
     let para = Paragraph::new(Line::from(spans))
@@ -119,29 +145,29 @@ fn render_footer(frame: &mut Frame, area: Rect, hints: &[(&str, &str)]) {
         .block(
             Block::default()
                 .borders(Borders::TOP)
-                .border_style(Style::default().fg(C_DIM)),
+                .border_style(Style::default().fg(pal.dim)),
         );
 
     frame.render_widget(para, area);
 }
 
-fn render_breadcrumbs(frame: &mut Frame, area: Rect, active: usize) {
+fn render_breadcrumbs(frame: &mut Frame, area: Rect, active: usize, pal: &TuiPalette) {
     let steps: &[(usize, &str)] = &[(1, "Select Image"), (2, "Select Drive"), (3, "Flash")];
 
     let mut spans: Vec<Span> = Vec::new();
     for (i, (num, label)) in steps.iter().enumerate() {
         if i > 0 {
-            spans.push(Span::styled("  ──  ", Style::default().fg(C_DIM)));
+            spans.push(Span::styled("  ──  ", Style::default().fg(pal.dim)));
         }
         let is_active = *num == active;
         let style = if is_active {
             Style::default()
-                .fg(C_BRAND)
+                .fg(pal.brand)
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
         } else if *num < active {
-            Style::default().fg(C_SUCCESS)
+            Style::default().fg(pal.success)
         } else {
-            Style::default().fg(C_DIM)
+            Style::default().fg(pal.dim)
         };
         let bullet = if *num < active {
             "✓".to_string()
@@ -173,40 +199,287 @@ fn chrome_layout(area: Rect) -> [Rect; 4] {
 
 // ── Screen: SelectImage ───────────────────────────────────────────────────────
 
-fn render_browse_image(app: &mut App, frame: &mut Frame, area: Rect) {
+fn render_browse_image(
+    app: &mut App,
+    frame: &mut Frame,
+    area: Rect,
+    pal: &TuiPalette,
+    theme_name: &str,
+) {
     let [hdr, bc, body, ftr] = chrome_layout(area);
 
-    render_header(frame, hdr, "OS Image Writer");
-    render_breadcrumbs(frame, bc, 1);
+    render_header(frame, hdr, "OS Image Writer", theme_name, pal);
+    render_breadcrumbs(frame, bc, 1, pal);
     render_footer(
         frame,
         ftr,
         &[
-            ("↑/↓ or j/k", "Navigate"),
-            ("Enter", "Select / Open"),
-            ("← or Backspace", "Go up"),
-            ("Tab", "Back to input"),
-            ("Esc", "Dismiss"),
+            ("\u{2191}/\u{2193}/j/k", "Navigate"),
+            ("Enter", "Open / Select"),
+            ("\u{2190}/Bksp", "Go up"),
+            ("/", "Search"),
+            ("y/x/p/d", "Copy/Cut/Paste/Del"),
+            ("Ctrl+T", "Cycle theme"),
+            ("Shift+T", "Theme panel"),
+            ("Esc", "Back"),
         ],
+        pal,
     );
 
-    file_explorer::render(&mut app.file_explorer, frame, body);
+    let theme = app.current_explorer_theme().clone();
+    render_themed(&mut app.file_explorer, frame, body, &theme);
+
+    match &app.file_op_mode {
+        FileOpMode::ConfirmDelete(path) => {
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            render_file_op_modal(
+                frame,
+                " \u{26a0}  Confirm Delete ",
+                &format!("Delete \"{}\"?", name),
+                area,
+                pal,
+            );
+        }
+        FileOpMode::ConfirmOverwrite { dst, .. } => {
+            let name = dst
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            render_file_op_modal(
+                frame,
+                " \u{26a0}  Confirm Overwrite ",
+                &format!("\"{}\" already exists. Overwrite?", name),
+                area,
+                pal,
+            );
+        }
+        FileOpMode::Normal => {
+            if !app.file_op_status.is_empty() || app.file_clipboard.is_some() {
+                render_file_op_status(app, frame, body, pal);
+            }
+        }
+    }
 }
 
-fn render_select_image(app: &mut App, frame: &mut Frame, area: Rect) {
+/// Overlay the global theme-picker panel on the right side of `area`.
+///
+/// The panel is drawn on top of whatever screen is currently active.
+/// Navigation: ↑/↓ or j/k to move cursor, Enter to apply, Esc/T to close.
+fn render_app_theme_panel(app: &App, frame: &mut Frame, area: Rect, pal: &TuiPalette) {
+    // Panel width: wide enough for theme names + decorations.
+    const PANEL_W: u16 = 36;
+    let panel_w = PANEL_W.min(area.width);
+    let panel_area = Rect {
+        x: area.x + area.width.saturating_sub(panel_w),
+        y: area.y,
+        width: panel_w,
+        height: area.height,
+    };
+
+    // Split into [list | current-name footer]
+    let split = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(4)])
+        .split(panel_area);
+
+    // Scroll so the cursor row is always visible.
+    let inner_h = split[0].height.saturating_sub(2) as usize; // subtract borders
+                                                              // +2 accounts for the two header lines inside the list block
+    let row = app.app_theme_panel_cursor + 2;
+    let scroll_y = (row + 1).saturating_sub(inner_h) as u16;
+
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled(
+            "  ↑/k prev   ↓/j next",
+            Style::default().fg(pal.dim),
+        )),
+        Line::from(vec![]),
+    ];
+    for (i, (name, _)) in app.explorer_themes.iter().enumerate() {
+        let is_active = i == app.explorer_theme_idx;
+        let is_cursor = i == app.app_theme_panel_cursor;
+
+        let indicator = if is_cursor { " \u{25b6} " } else { "   " };
+        let style = if is_cursor && is_active {
+            Style::default()
+                .fg(pal.brand)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        } else if is_cursor {
+            Style::default()
+                .fg(pal.accent)
+                .add_modifier(Modifier::REVERSED)
+        } else if is_active {
+            Style::default().fg(pal.brand).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(pal.dim)
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(indicator, style),
+            Span::styled(format!("{:>2}. ", i + 1), Style::default().fg(pal.accent)),
+            Span::styled(name.clone(), style),
+        ]));
+    }
+
+    frame.render_widget(Clear, split[0]);
+    let panel = Paragraph::new(lines).scroll((scroll_y, 0)).block(
+        Block::default()
+            .title(Span::styled(
+                " \u{1f3a8} Themes ",
+                Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
+            ))
+            .title_alignment(Alignment::Center)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(pal.accent)),
+    );
+    frame.render_widget(panel, split[0]);
+
+    // Footer: shows active theme name + hint
+    let active_name = &app.explorer_themes[app.explorer_theme_idx].0;
+    let cursor_name = &app.explorer_themes[app.app_theme_panel_cursor].0;
+    let footer_lines = vec![
+        Line::from(Span::styled(
+            format!("  \u{25cf} {cursor_name}"),
+            Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(vec![
+            Span::styled("  Active: ", Style::default().fg(pal.dim)),
+            Span::styled(
+                active_name.clone(),
+                Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(Span::styled(
+            "  [Enter] apply  [T/Esc] close",
+            Style::default().fg(pal.dim),
+        )),
+    ];
+    frame.render_widget(Clear, split[1]);
+    let footer = Paragraph::new(footer_lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(pal.dim)),
+    );
+    frame.render_widget(footer, split[1]);
+}
+
+fn render_file_op_modal(frame: &mut Frame, title: &str, body: &str, area: Rect, pal: &TuiPalette) {
+    let w = 60u16;
+    let h = 7u16;
+    let x = area.x + area.width.saturating_sub(w) / 2;
+    let y = area.y + area.height.saturating_sub(h) / 2;
+    let modal = Rect {
+        x,
+        y,
+        width: w.min(area.width),
+        height: h.min(area.height),
+    };
+    frame.render_widget(Clear, modal);
+    let lines = vec![
+        Line::from(vec![]),
+        Line::from(Span::styled(
+            format!("  {body}"),
+            Style::default().fg(pal.fg),
+        )),
+        Line::from(vec![]),
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                " y ",
+                Style::default()
+                    .fg(pal.success)
+                    .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+            ),
+            Span::styled(" Yes       ", Style::default().fg(pal.success)),
+            Span::styled(
+                " n / Esc ",
+                Style::default()
+                    .fg(pal.dim)
+                    .add_modifier(Modifier::REVERSED),
+            ),
+            Span::styled(" No", Style::default().fg(pal.dim)),
+        ]),
+    ];
+    let popup = Paragraph::new(lines).block(
+        Block::default()
+            .title(Span::styled(
+                title,
+                Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
+            ))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(pal.brand)),
+    );
+    frame.render_widget(popup, modal);
+}
+
+fn render_file_op_status(app: &App, frame: &mut Frame, area: Rect, pal: &TuiPalette) {
+    use crate::tui::app::ClipOp;
+    let text = if !app.file_op_status.is_empty() {
+        app.file_op_status.clone()
+    } else if let Some(clip) = &app.file_clipboard {
+        let op = match clip.op {
+            ClipOp::Copy => "Copy",
+            ClipOp::Cut => "Cut",
+        };
+        format!(
+            "{op}: {}",
+            clip.path.file_name().unwrap_or_default().to_string_lossy()
+        )
+    } else {
+        return;
+    };
+    let bar_w = (text.len() as u16 + 4).min(area.width);
+    let bar = Rect {
+        x: area.x + area.width.saturating_sub(bar_w),
+        y: area.y + area.height.saturating_sub(4),
+        width: bar_w,
+        height: 3,
+    };
+    frame.render_widget(Clear, bar);
+    let p = Paragraph::new(Span::styled(
+        format!(" {text} "),
+        Style::default().fg(pal.success),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(pal.accent)),
+    );
+    frame.render_widget(p, bar);
+}
+
+fn render_select_image(
+    app: &mut App,
+    frame: &mut Frame,
+    area: Rect,
+    pal: &TuiPalette,
+    theme_name: &str,
+) {
     let [hdr, bc, body, ftr] = chrome_layout(area);
 
-    render_header(frame, hdr, "OS Image Writer");
-    render_breadcrumbs(frame, bc, 1);
+    render_header(frame, hdr, "OS Image Writer", theme_name, pal);
+    render_breadcrumbs(frame, bc, 1, pal);
     render_footer(
         frame,
         ftr,
         &[
             ("Enter", "Confirm path"),
             ("Tab", "Browse files"),
+            ("Ctrl+T", "Cycle theme"),
+            ("Shift+T", "Theme panel"),
             ("←/→", "Move cursor"),
             ("Ctrl-C", "Quit"),
         ],
+        pal,
     );
 
     let rows = Layout::default()
@@ -222,37 +495,37 @@ fn render_select_image(app: &mut App, frame: &mut Frame, area: Rect) {
     // Instruction panel
     let instr = Paragraph::new(vec![
         Line::from(vec![
-            Span::styled("Enter the full path to an ", Style::default().fg(C_DIM)),
+            Span::styled("Enter the full path to an ", Style::default().fg(pal.dim)),
             Span::styled(
                 ".iso / .img",
-                Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 " file to flash onto your USB drive.",
-                Style::default().fg(C_DIM),
+                Style::default().fg(pal.dim),
             ),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Example: ", Style::default().fg(C_DIM)),
+            Span::styled("Example: ", Style::default().fg(pal.dim)),
             Span::styled(
                 "/home/user/Downloads/ubuntu-24.04-desktop-amd64.iso",
-                Style::default().fg(Color::Rgb(160, 160, 170)),
+                Style::default().fg(pal.dim),
             ),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Press ", Style::default().fg(C_DIM)),
+            Span::styled("Press ", Style::default().fg(pal.dim)),
             Span::styled(
                 "Tab",
-                Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" to open the interactive ", Style::default().fg(C_DIM)),
+            Span::styled(" to open the interactive ", Style::default().fg(pal.dim)),
             Span::styled(
                 "file browser",
-                Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" instead.", Style::default().fg(C_DIM)),
+            Span::styled(" instead.", Style::default().fg(pal.dim)),
         ]),
     ])
     .alignment(Alignment::Center)
@@ -260,18 +533,18 @@ fn render_select_image(app: &mut App, frame: &mut Frame, area: Rect) {
         Block::default()
             .title(Span::styled(
                 " 📁  Select OS Image ",
-                Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(C_ACCENT))
+            .border_style(Style::default().fg(pal.accent))
             .padding(Padding::uniform(1)),
     );
     frame.render_widget(instr, rows[1]);
 
     // Text input field
     let is_editing = app.input_mode == InputMode::Editing;
-    let border_color = if is_editing { C_BRAND } else { C_DIM };
+    let border_color = if is_editing { pal.brand } else { pal.dim };
     let mode_label = if is_editing {
         " EDITING "
     } else {
@@ -295,7 +568,7 @@ fn render_select_image(app: &mut App, frame: &mut Frame, area: Rect) {
     };
 
     let input_para = Paragraph::new(Span::raw(display))
-        .style(Style::default().fg(C_FG))
+        .style(Style::default().fg(pal.fg))
         .block(
             Block::default()
                 .title(Span::styled(
@@ -313,20 +586,29 @@ fn render_select_image(app: &mut App, frame: &mut Frame, area: Rect) {
 
 // ── Screen: SelectDrive ───────────────────────────────────────────────────────
 
-fn render_select_drive(app: &mut App, frame: &mut Frame, area: Rect) {
+fn render_select_drive(
+    app: &mut App,
+    frame: &mut Frame,
+    area: Rect,
+    pal: &TuiPalette,
+    theme_name: &str,
+) {
     let [hdr, bc, body, ftr] = chrome_layout(area);
 
-    render_header(frame, hdr, "OS Image Writer");
-    render_breadcrumbs(frame, bc, 2);
+    render_header(frame, hdr, "OS Image Writer", theme_name, pal);
+    render_breadcrumbs(frame, bc, 2, pal);
     render_footer(
         frame,
         ftr,
         &[
             ("↑/↓", "Navigate"),
             ("Enter / Space", "Select"),
+            ("Ctrl+T", "Cycle theme"),
+            ("Shift+T", "Theme panel"),
             ("R / F5", "Refresh"),
             ("B / Esc", "Back"),
         ],
+        pal,
     );
 
     let cols = Layout::default()
@@ -342,7 +624,7 @@ fn render_select_drive(app: &mut App, frame: &mut Frame, area: Rect) {
             " ⟳  Scanning for drives… ".to_string(),
             vec![ListItem::new(Line::from(Span::styled(
                 "  Detecting USB drives…",
-                Style::default().fg(C_DIM),
+                Style::default().fg(pal.dim),
             )))],
         )
     } else if drives.is_empty() {
@@ -350,7 +632,7 @@ fn render_select_drive(app: &mut App, frame: &mut Frame, area: Rect) {
             " 💾  No drives found ".to_string(),
             vec![ListItem::new(Line::from(Span::styled(
                 "  No removable drives detected. Press [R] to refresh.",
-                Style::default().fg(C_WARN),
+                Style::default().fg(pal.warn),
             )))],
         )
     } else {
@@ -364,13 +646,13 @@ fn render_select_drive(app: &mut App, frame: &mut Frame, area: Rect) {
                 // tui-checkbox: checked if this is the actively selected drive,
                 // styled differently if it is the highlighted cursor row.
                 let cb_style = if d.is_system || d.is_read_only {
-                    Style::default().fg(C_DIM)
+                    Style::default().fg(pal.dim)
                 } else if selected {
                     Style::default()
-                        .fg(C_BRAND)
+                        .fg(pal.brand)
                         .add_modifier(Modifier::BOLD | Modifier::REVERSED)
                 } else {
-                    Style::default().fg(C_FG)
+                    Style::default().fg(pal.fg)
                 };
 
                 let size_str = if d.size_gb >= 1.0 {
@@ -396,7 +678,7 @@ fn render_select_drive(app: &mut App, frame: &mut Frame, area: Rect) {
                 let prefix = if selected { " ▶ " } else { "   " };
 
                 ListItem::new(Line::from(vec![
-                    Span::styled(prefix, Style::default().fg(C_ACCENT)),
+                    Span::styled(prefix, Style::default().fg(pal.accent)),
                     Span::styled(checked_sym, cb_style.add_modifier(Modifier::BOLD)),
                     Span::styled(label, cb_style),
                 ]))
@@ -416,13 +698,13 @@ fn render_select_drive(app: &mut App, frame: &mut Frame, area: Rect) {
             Block::default()
                 .title(Span::styled(
                     title_text,
-                    Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
+                    Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(C_ACCENT)),
+                .border_style(Style::default().fg(pal.accent)),
         )
-        .highlight_style(Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD));
+        .highlight_style(Style::default().fg(pal.brand).add_modifier(Modifier::BOLD));
 
     frame.render_stateful_widget(list, cols[0], &mut list_state);
 
@@ -431,17 +713,17 @@ fn render_select_drive(app: &mut App, frame: &mut Frame, area: Rect) {
         let status_spans = if d.is_system {
             vec![Span::styled(
                 "⚠ System drive — cannot flash",
-                Style::default().fg(C_ERR),
+                Style::default().fg(pal.err),
             )]
         } else if d.is_read_only {
             vec![Span::styled(
                 "⚠ Read-only — cannot flash",
-                Style::default().fg(C_WARN),
+                Style::default().fg(pal.warn),
             )]
         } else {
             vec![Span::styled(
                 "✓ Available for flashing",
-                Style::default().fg(C_SUCCESS),
+                Style::default().fg(pal.success),
             )]
         };
 
@@ -453,24 +735,24 @@ fn render_select_drive(app: &mut App, frame: &mut Frame, area: Rect) {
 
         vec![
             Line::from(vec![
-                Span::styled("Name:    ", Style::default().fg(C_DIM)),
+                Span::styled("Name:    ", Style::default().fg(pal.dim)),
                 Span::styled(
                     d.name.clone(),
-                    Style::default().fg(C_FG).add_modifier(Modifier::BOLD),
+                    Style::default().fg(pal.fg).add_modifier(Modifier::BOLD),
                 ),
             ]),
             Line::from(""),
             Line::from(vec![
-                Span::styled("Device:  ", Style::default().fg(C_DIM)),
-                Span::styled(d.device_path.clone(), Style::default().fg(C_ACCENT)),
+                Span::styled("Device:  ", Style::default().fg(pal.dim)),
+                Span::styled(d.device_path.clone(), Style::default().fg(pal.accent)),
             ]),
             Line::from(vec![
-                Span::styled("Mount:   ", Style::default().fg(C_DIM)),
-                Span::styled(d.mount_point.clone(), Style::default().fg(C_DIM)),
+                Span::styled("Mount:   ", Style::default().fg(pal.dim)),
+                Span::styled(d.mount_point.clone(), Style::default().fg(pal.dim)),
             ]),
             Line::from(vec![
-                Span::styled("Size:    ", Style::default().fg(C_DIM)),
-                Span::styled(size_str, Style::default().fg(C_FG)),
+                Span::styled("Size:    ", Style::default().fg(pal.dim)),
+                Span::styled(size_str, Style::default().fg(pal.fg)),
             ]),
             Line::from(""),
             Line::from(status_spans),
@@ -478,7 +760,7 @@ fn render_select_drive(app: &mut App, frame: &mut Frame, area: Rect) {
     } else {
         vec![Line::from(Span::styled(
             "No drive selected",
-            Style::default().fg(C_DIM),
+            Style::default().fg(pal.dim),
         ))]
     };
 
@@ -487,11 +769,11 @@ fn render_select_drive(app: &mut App, frame: &mut Frame, area: Rect) {
             Block::default()
                 .title(Span::styled(
                     " Drive Details ",
-                    Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD),
+                    Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(C_DIM))
+                .border_style(Style::default().fg(pal.dim))
                 .padding(Padding::uniform(1)),
         )
         .wrap(Wrap { trim: true });
@@ -501,15 +783,27 @@ fn render_select_drive(app: &mut App, frame: &mut Frame, area: Rect) {
 
 // ── Screen: DriveInfo ─────────────────────────────────────────────────────────
 
-fn render_drive_info(app: &mut App, frame: &mut Frame, area: Rect) {
+fn render_drive_info(
+    app: &mut App,
+    frame: &mut Frame,
+    area: Rect,
+    pal: &TuiPalette,
+    theme_name: &str,
+) {
     let [hdr, bc, body, ftr] = chrome_layout(area);
 
-    render_header(frame, hdr, "Drive Storage Overview");
-    render_breadcrumbs(frame, bc, 2);
+    render_header(frame, hdr, "Drive Storage Overview", theme_name, pal);
+    render_breadcrumbs(frame, bc, 2, pal);
     render_footer(
         frame,
         ftr,
-        &[("Enter / F", "Continue to confirm"), ("B / Esc", "Back")],
+        &[
+            ("Enter / F", "Continue to confirm"),
+            ("Ctrl+T", "Cycle theme"),
+            ("Shift+T", "Theme panel"),
+            ("B / Esc", "Back"),
+        ],
+        pal,
     );
 
     let cols = Layout::default()
@@ -529,8 +823,8 @@ fn render_drive_info(app: &mut App, frame: &mut Frame, area: Rect) {
     };
 
     let slices = vec![
-        PieSlice::new("Image", image_pct, Color::Rgb(255, 100, 30)),
-        PieSlice::new("Free", free_pct, Color::Rgb(80, 200, 255)),
+        PieSlice::new("Image", image_pct, pal.brand),
+        PieSlice::new("Free", free_pct, pal.accent),
     ];
 
     let pie = PieChart::new(slices)
@@ -543,11 +837,11 @@ fn render_drive_info(app: &mut App, frame: &mut Frame, area: Rect) {
             Block::default()
                 .title(Span::styled(
                     " 🥧  Drive Storage Layout ",
-                    Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD),
+                    Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(C_ACCENT)),
+                .border_style(Style::default().fg(pal.accent)),
         );
 
     frame.render_widget(pie, cols[0]);
@@ -567,7 +861,7 @@ fn render_drive_info(app: &mut App, frame: &mut Frame, area: Rect) {
         Line::from(Span::styled(
             "Image Details",
             Style::default()
-                .fg(C_ACCENT)
+                .fg(pal.accent)
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
         )),
         Line::from(""),
@@ -575,15 +869,15 @@ fn render_drive_info(app: &mut App, frame: &mut Frame, area: Rect) {
 
     if let Some(img) = &app.selected_image {
         lines.push(Line::from(vec![
-            Span::styled("File:   ", Style::default().fg(C_DIM)),
+            Span::styled("File:   ", Style::default().fg(pal.dim)),
             Span::styled(
                 img.name.clone(),
-                Style::default().fg(C_FG).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.fg).add_modifier(Modifier::BOLD),
             ),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("Size:   ", Style::default().fg(C_DIM)),
-            Span::styled(fmt_bytes(image_bytes), Style::default().fg(C_BRAND)),
+            Span::styled("Size:   ", Style::default().fg(pal.dim)),
+            Span::styled(fmt_bytes(image_bytes), Style::default().fg(pal.brand)),
         ]));
     }
 
@@ -591,43 +885,43 @@ fn render_drive_info(app: &mut App, frame: &mut Frame, area: Rect) {
     lines.push(Line::from(Span::styled(
         "Drive Details",
         Style::default()
-            .fg(C_ACCENT)
+            .fg(pal.accent)
             .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
     )));
     lines.push(Line::from(""));
 
     if let Some(d) = &app.selected_drive {
         lines.push(Line::from(vec![
-            Span::styled("Name:   ", Style::default().fg(C_DIM)),
+            Span::styled("Name:   ", Style::default().fg(pal.dim)),
             Span::styled(
                 d.name.clone(),
-                Style::default().fg(C_FG).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.fg).add_modifier(Modifier::BOLD),
             ),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("Device: ", Style::default().fg(C_DIM)),
-            Span::styled(d.device_path.clone(), Style::default().fg(C_ACCENT)),
+            Span::styled("Device: ", Style::default().fg(pal.dim)),
+            Span::styled(d.device_path.clone(), Style::default().fg(pal.accent)),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("Total:  ", Style::default().fg(C_DIM)),
-            Span::styled(fmt_bytes(drive_bytes), Style::default().fg(C_FG)),
+            Span::styled("Total:  ", Style::default().fg(pal.dim)),
+            Span::styled(fmt_bytes(drive_bytes), Style::default().fg(pal.fg)),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("Image:  ", Style::default().fg(C_DIM)),
+            Span::styled("Image:  ", Style::default().fg(pal.dim)),
             Span::styled(
                 format!("{} ({:.1}%)", fmt_bytes(image_bytes), image_pct),
-                Style::default().fg(Color::Rgb(255, 100, 30)),
+                Style::default().fg(pal.brand),
             ),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("Free:   ", Style::default().fg(C_DIM)),
+            Span::styled("Free:   ", Style::default().fg(pal.dim)),
             Span::styled(
                 format!(
                     "{} ({:.1}%)",
                     fmt_bytes(drive_bytes.saturating_sub(image_bytes)),
                     free_pct
                 ),
-                Style::default().fg(Color::Rgb(80, 200, 255)),
+                Style::default().fg(pal.accent),
             ),
         ]));
 
@@ -635,7 +929,7 @@ fn render_drive_info(app: &mut App, frame: &mut Frame, area: Rect) {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "⚠ Image is larger than the drive!",
-                Style::default().fg(C_ERR).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.err).add_modifier(Modifier::BOLD),
             )));
         }
     }
@@ -645,11 +939,11 @@ fn render_drive_info(app: &mut App, frame: &mut Frame, area: Rect) {
             Block::default()
                 .title(Span::styled(
                     " Storage Info ",
-                    Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD),
+                    Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(C_DIM))
+                .border_style(Style::default().fg(pal.dim))
                 .padding(Padding::uniform(1)),
         )
         .wrap(Wrap { trim: true });
@@ -659,15 +953,27 @@ fn render_drive_info(app: &mut App, frame: &mut Frame, area: Rect) {
 
 // ── Screen: ConfirmFlash ──────────────────────────────────────────────────────
 
-fn render_confirm_flash(app: &mut App, frame: &mut Frame, area: Rect) {
+fn render_confirm_flash(
+    app: &mut App,
+    frame: &mut Frame,
+    area: Rect,
+    pal: &TuiPalette,
+    theme_name: &str,
+) {
     let [hdr, bc, body, ftr] = chrome_layout(area);
 
-    render_header(frame, hdr, "Confirm Flash Operation");
-    render_breadcrumbs(frame, bc, 3);
+    render_header(frame, hdr, "Confirm Flash Operation", theme_name, pal);
+    render_breadcrumbs(frame, bc, 3, pal);
     render_footer(
         frame,
         ftr,
-        &[("Y / Enter", "Flash now"), ("N / Esc / B", "Go back")],
+        &[
+            ("Y / Enter", "Flash now"),
+            ("Ctrl+T", "Cycle theme"),
+            ("Shift+T", "Theme panel"),
+            ("N / Esc / B", "Go back"),
+        ],
+        pal,
     );
 
     // Centre a dialog box
@@ -705,42 +1011,44 @@ fn render_confirm_flash(app: &mut App, frame: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled(
                 "  ⚠  ",
-                Style::default().fg(C_WARN).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.warn).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "ALL DATA ON THE TARGET DRIVE WILL BE ERASED",
-                Style::default().fg(C_WARN).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.warn).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  Image:   ", Style::default().fg(C_DIM)),
+            Span::styled("  Image:   ", Style::default().fg(pal.dim)),
             Span::styled(
                 image_name,
-                Style::default().fg(C_FG).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.fg).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(format!("  ({})", image_size), Style::default().fg(C_DIM)),
+            Span::styled(format!("  ({})", image_size), Style::default().fg(pal.dim)),
         ]),
         Line::from(vec![
-            Span::styled("  Target:  ", Style::default().fg(C_DIM)),
+            Span::styled("  Target:  ", Style::default().fg(pal.dim)),
             Span::styled(
                 drive_desc,
-                Style::default().fg(C_ERR).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.err).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  Press ", Style::default().fg(C_DIM)),
+            Span::styled("  Press ", Style::default().fg(pal.dim)),
             Span::styled(
                 "[Y / Enter]",
-                Style::default().fg(C_SUCCESS).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(pal.success)
+                    .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" to flash  or  ", Style::default().fg(C_DIM)),
+            Span::styled(" to flash  or  ", Style::default().fg(pal.dim)),
             Span::styled(
                 "[N / Esc]",
-                Style::default().fg(C_ERR).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.err).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" to cancel.", Style::default().fg(C_DIM)),
+            Span::styled(" to cancel.", Style::default().fg(pal.dim)),
         ]),
     ];
 
@@ -749,12 +1057,12 @@ fn render_confirm_flash(app: &mut App, frame: &mut Frame, area: Rect) {
             Block::default()
                 .title(Span::styled(
                     " ⚡  Ready to Flash ",
-                    Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD),
+                    Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
                 ))
                 .title_alignment(Alignment::Center)
                 .borders(Borders::ALL)
                 .border_type(BorderType::Double)
-                .border_style(Style::default().fg(C_WARN)),
+                .border_style(Style::default().fg(pal.warn)),
         )
         .wrap(Wrap { trim: false });
 
@@ -780,8 +1088,12 @@ fn render_confirm_flash(app: &mut App, frame: &mut Frame, area: Rect) {
         format!("Image ready: {image_name}"),
         app.selected_image.is_some(),
     )
-    .checkbox_style(Style::default().fg(C_SUCCESS).add_modifier(Modifier::BOLD))
-    .label_style(Style::default().fg(C_DIM))
+    .checkbox_style(
+        Style::default()
+            .fg(pal.success)
+            .add_modifier(Modifier::BOLD),
+    )
+    .label_style(Style::default().fg(pal.dim))
     .checked_symbol("☑ ")
     .unchecked_symbol("☐ ");
 
@@ -802,16 +1114,16 @@ fn render_confirm_flash(app: &mut App, frame: &mut Frame, area: Rect) {
     )
     .checkbox_style(
         Style::default()
-            .fg(if drive_ready { C_SUCCESS } else { C_ERR })
+            .fg(if drive_ready { pal.success } else { pal.err })
             .add_modifier(Modifier::BOLD),
     )
-    .label_style(Style::default().fg(C_DIM))
+    .label_style(Style::default().fg(pal.dim))
     .checked_symbol("☑ ")
     .unchecked_symbol("☐ ");
 
     let cb_warn = Checkbox::new("Data loss understood", true)
-        .checkbox_style(Style::default().fg(C_WARN).add_modifier(Modifier::BOLD))
-        .label_style(Style::default().fg(C_DIM))
+        .checkbox_style(Style::default().fg(pal.warn).add_modifier(Modifier::BOLD))
+        .label_style(Style::default().fg(pal.dim))
         .checked_symbol("☑ ")
         .unchecked_symbol("☐ ");
 
@@ -822,11 +1134,17 @@ fn render_confirm_flash(app: &mut App, frame: &mut Frame, area: Rect) {
 
 // ── Screen: Flashing ──────────────────────────────────────────────────────────
 
-fn render_flashing(app: &mut App, frame: &mut Frame, area: Rect) {
+fn render_flashing(
+    app: &mut App,
+    frame: &mut Frame,
+    area: Rect,
+    pal: &TuiPalette,
+    theme_name: &str,
+) {
     let [hdr, _bc, body, ftr] = chrome_layout(area);
 
-    render_header(frame, hdr, "Flashing…");
-    render_footer(frame, ftr, &[("C / Esc", "Cancel flash")]);
+    render_header(frame, hdr, "Flashing…", theme_name, pal);
+    render_footer(frame, ftr, &[("C / Esc", "Cancel flash")], pal);
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -843,10 +1161,10 @@ fn render_flashing(app: &mut App, frame: &mut Frame, area: Rect) {
     let stage_label = app.flash_stage.trim().to_string();
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("Stage: ", Style::default().fg(C_DIM)),
+            Span::styled("Stage: ", Style::default().fg(pal.dim)),
             Span::styled(
                 stage_label,
-                Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
             ),
         ]))
         .alignment(Alignment::Center),
@@ -864,12 +1182,12 @@ fn render_flashing(app: &mut App, frame: &mut Frame, area: Rect) {
     let slider_outer = Block::default()
         .title(Span::styled(
             format!(" ⚡  Flashing  {pct_label} "),
-            Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD),
+            Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
         ))
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(C_ACCENT));
+        .border_style(Style::default().fg(pal.accent));
 
     let slider_inner = slider_outer.inner(rows[2]);
     frame.render_widget(slider_outer, rows[2]);
@@ -882,8 +1200,8 @@ fn render_flashing(app: &mut App, frame: &mut Frame, area: Rect) {
         .show_handle(false) // pure progress-bar style
         .filled_symbol("━")
         .empty_symbol("─")
-        .filled_color(Color::Rgb(255, 100, 30)) // C_BRAND
-        .empty_color(Color::Rgb(120, 120, 130)); // C_DIM
+        .filled_color(pal.brand)
+        .empty_color(pal.dim);
 
     frame.render_widget(slider, slider_inner);
 
@@ -904,28 +1222,28 @@ fn render_flashing(app: &mut App, frame: &mut Frame, area: Rect) {
     let total = app.image_size_bytes();
     let stats_lines = vec![
         Line::from(vec![
-            Span::styled("Written:  ", Style::default().fg(C_DIM)),
+            Span::styled("Written:  ", Style::default().fg(pal.dim)),
             Span::styled(
                 fmt_bytes(app.flash_bytes),
-                Style::default().fg(C_FG).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.fg).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Total:    ", Style::default().fg(C_DIM)),
-            Span::styled(fmt_bytes(total), Style::default().fg(C_DIM)),
+            Span::styled("Total:    ", Style::default().fg(pal.dim)),
+            Span::styled(fmt_bytes(total), Style::default().fg(pal.dim)),
         ]),
         Line::from(vec![
-            Span::styled("Speed:    ", Style::default().fg(C_DIM)),
+            Span::styled("Speed:    ", Style::default().fg(pal.dim)),
             Span::styled(
                 format!("{:.1} MB/s", app.flash_speed),
-                Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Progress: ", Style::default().fg(C_DIM)),
+            Span::styled("Progress: ", Style::default().fg(pal.dim)),
             Span::styled(
                 pct_label,
-                Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
             ),
         ]),
     ];
@@ -934,11 +1252,11 @@ fn render_flashing(app: &mut App, frame: &mut Frame, area: Rect) {
         Block::default()
             .title(Span::styled(
                 " Statistics ",
-                Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(C_DIM))
+            .border_style(Style::default().fg(pal.dim))
             .padding(Padding::horizontal(1)),
     );
     frame.render_widget(stats, stats_log_cols[0]);
@@ -953,13 +1271,13 @@ fn render_flashing(app: &mut App, frame: &mut Frame, area: Rect) {
         .rev()
         .map(|l| {
             let style = if l.to_lowercase().contains("error") {
-                Style::default().fg(C_ERR)
+                Style::default().fg(pal.err)
             } else if l.to_lowercase().contains("complete") || l.to_lowercase().contains("done") {
-                Style::default().fg(C_SUCCESS)
+                Style::default().fg(pal.success)
             } else if l.to_uppercase() == *l && !l.is_empty() {
-                Style::default().fg(C_ACCENT)
+                Style::default().fg(pal.accent)
             } else {
-                Style::default().fg(C_DIM)
+                Style::default().fg(pal.dim)
             };
             Line::from(Span::styled(l.as_str(), style))
         })
@@ -969,11 +1287,11 @@ fn render_flashing(app: &mut App, frame: &mut Frame, area: Rect) {
         Block::default()
             .title(Span::styled(
                 " Log ",
-                Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(C_DIM))
+            .border_style(Style::default().fg(pal.dim))
             .padding(Padding::horizontal(1)),
     );
     frame.render_widget(log, stats_log_cols[1]);
@@ -981,18 +1299,27 @@ fn render_flashing(app: &mut App, frame: &mut Frame, area: Rect) {
 
 // ── Screen: Complete ──────────────────────────────────────────────────────────
 
-fn render_complete(app: &mut App, frame: &mut Frame, area: Rect) {
+fn render_complete(
+    app: &mut App,
+    frame: &mut Frame,
+    area: Rect,
+    pal: &TuiPalette,
+    theme_name: &str,
+) {
     let [hdr, _bc, body, ftr] = chrome_layout(area);
 
-    render_header(frame, hdr, "Flash Complete!");
+    render_header(frame, hdr, "Flash Complete!", theme_name, pal);
     render_footer(
         frame,
         ftr,
         &[
             ("↑/↓", "Scroll contents"),
+            ("Ctrl+T", "Cycle theme"),
+            ("Shift+T", "Theme panel"),
             ("R", "Flash again"),
             ("Q / Esc", "Quit"),
         ],
+        pal,
     );
 
     let rows = Layout::default()
@@ -1010,16 +1337,18 @@ fn render_complete(app: &mut App, frame: &mut Frame, area: Rect) {
     let banner = Paragraph::new(Line::from(vec![
         Span::styled(
             "  ✓  Flash completed successfully!",
-            Style::default().fg(C_SUCCESS).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(pal.success)
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(drive_name, Style::default().fg(C_DIM)),
+        Span::styled(drive_name, Style::default().fg(pal.dim)),
     ]))
     .alignment(Alignment::Center)
     .block(
         Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(C_SUCCESS)),
+            .border_style(Style::default().fg(pal.success)),
     );
     frame.render_widget(banner, rows[0]);
 
@@ -1029,18 +1358,18 @@ fn render_complete(app: &mut App, frame: &mut Frame, area: Rect) {
         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(rows[1]);
 
-    render_usb_contents(app, frame, cols[0]);
-    render_contents_piechart(app, frame, cols[1]);
+    render_usb_contents(app, frame, cols[0], pal);
+    render_contents_piechart(app, frame, cols[1], pal);
 }
 
-fn render_usb_contents(app: &App, frame: &mut Frame, area: Rect) {
+fn render_usb_contents(app: &App, frame: &mut Frame, area: Rect, pal: &TuiPalette) {
     let inner_h = area.height.saturating_sub(2) as usize;
     let entries = &app.usb_contents;
 
     let items: Vec<ListItem> = if entries.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
             "  (no contents to display)",
-            Style::default().fg(C_DIM),
+            Style::default().fg(pal.dim),
         )))]
     } else {
         entries
@@ -1056,16 +1385,16 @@ fn render_usb_contents(app: &App, frame: &mut Frame, area: Rect) {
                     String::new()
                 };
                 let name_style = if e.is_dir {
-                    Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD)
+                    Style::default().fg(pal.dir).add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(C_FG)
+                    Style::default().fg(pal.fg)
                 };
                 ListItem::new(Line::from(vec![
                     Span::raw(indent),
                     Span::raw(icon),
                     Span::raw(" "),
                     Span::styled(e.name.clone(), name_style),
-                    Span::styled(size_str, Style::default().fg(C_DIM)),
+                    Span::styled(size_str, Style::default().fg(pal.dim)),
                 ]))
             })
             .collect()
@@ -1085,34 +1414,34 @@ fn render_usb_contents(app: &App, frame: &mut Frame, area: Rect) {
         Block::default()
             .title(Span::styled(
                 format!(" 📋  USB Contents{scroll_info}"),
-                Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(C_SUCCESS)),
+            .border_style(Style::default().fg(pal.success)),
     );
 
     frame.render_widget(list, area);
 }
 
-fn render_contents_piechart(app: &App, frame: &mut Frame, area: Rect) {
+fn render_contents_piechart(app: &App, frame: &mut Frame, area: Rect, pal: &TuiPalette) {
     let (slices, legend_lines) = build_filetype_piechart(&app.usb_contents);
 
     if slices.is_empty() {
         let placeholder = Paragraph::new(Span::styled(
             "No files found on drive",
-            Style::default().fg(C_DIM),
+            Style::default().fg(pal.dim),
         ))
         .alignment(Alignment::Center)
         .block(
             Block::default()
                 .title(Span::styled(
                     " 🥧  Contents Breakdown ",
-                    Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD),
+                    Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(C_DIM)),
+                .border_style(Style::default().fg(pal.dim)),
         );
         frame.render_widget(placeholder, area);
         return;
@@ -1134,11 +1463,11 @@ fn render_contents_piechart(app: &App, frame: &mut Frame, area: Rect) {
             Block::default()
                 .title(Span::styled(
                     " 🥧  Contents Breakdown ",
-                    Style::default().fg(C_BRAND).add_modifier(Modifier::BOLD),
+                    Style::default().fg(pal.brand).add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(C_SUCCESS)),
+                .border_style(Style::default().fg(pal.success)),
         );
 
     frame.render_widget(pie, rows[0]);
@@ -1163,7 +1492,7 @@ fn render_contents_piechart(app: &App, frame: &mut Frame, area: Rect) {
         }
         let cb = Checkbox::new(format!("{:<18} — {} file(s)", label, count), true)
             .checkbox_style(Style::default().fg(*color).add_modifier(Modifier::BOLD))
-            .label_style(Style::default().fg(C_DIM))
+            .label_style(Style::default().fg(pal.dim))
             .checked_symbol("■ ")
             .unchecked_symbol("□ ");
 
@@ -1173,14 +1502,20 @@ fn render_contents_piechart(app: &App, frame: &mut Frame, area: Rect) {
 
 // ── Screen: Error ─────────────────────────────────────────────────────────────
 
-fn render_error(app: &mut App, frame: &mut Frame, area: Rect) {
+fn render_error(app: &mut App, frame: &mut Frame, area: Rect, pal: &TuiPalette, theme_name: &str) {
     let [hdr, _bc, body, ftr] = chrome_layout(area);
 
-    render_header(frame, hdr, "Error");
+    render_header(frame, hdr, "Error", theme_name, pal);
     render_footer(
         frame,
         ftr,
-        &[("R / Enter", "Try again"), ("Q / Esc", "Quit")],
+        &[
+            ("R / Enter", "Try again"),
+            ("Ctrl+T", "Cycle theme"),
+            ("Shift+T", "Theme panel"),
+            ("Q / Esc", "Quit"),
+        ],
+        pal,
     );
 
     let dialog = centred_rect(body, 62, 10);
@@ -1190,26 +1525,28 @@ fn render_error(app: &mut App, frame: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             "  ✕  An error occurred:",
-            Style::default().fg(C_ERR).add_modifier(Modifier::BOLD),
+            Style::default().fg(pal.err).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
             format!("  {}", app.error_message),
-            Style::default().fg(C_FG),
+            Style::default().fg(pal.fg),
         )),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  Press ", Style::default().fg(C_DIM)),
+            Span::styled("  Press ", Style::default().fg(pal.dim)),
             Span::styled(
                 "[R / Enter]",
-                Style::default().fg(C_SUCCESS).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(pal.success)
+                    .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" to start over  or  ", Style::default().fg(C_DIM)),
+            Span::styled(" to start over  or  ", Style::default().fg(pal.dim)),
             Span::styled(
                 "[Q / Esc]",
-                Style::default().fg(C_ERR).add_modifier(Modifier::BOLD),
+                Style::default().fg(pal.err).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" to quit.", Style::default().fg(C_DIM)),
+            Span::styled(" to quit.", Style::default().fg(pal.dim)),
         ]),
     ];
 
@@ -1218,12 +1555,12 @@ fn render_error(app: &mut App, frame: &mut Frame, area: Rect) {
             Block::default()
                 .title(Span::styled(
                     " ✕  FlashKraft Error ",
-                    Style::default().fg(C_ERR).add_modifier(Modifier::BOLD),
+                    Style::default().fg(pal.err).add_modifier(Modifier::BOLD),
                 ))
                 .title_alignment(Alignment::Center)
                 .borders(Borders::ALL)
                 .border_type(BorderType::Double)
-                .border_style(Style::default().fg(C_ERR)),
+                .border_style(Style::default().fg(pal.err)),
         )
         .wrap(Wrap { trim: true });
 

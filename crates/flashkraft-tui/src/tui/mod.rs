@@ -10,4 +10,6 @@
 pub mod app;
 pub mod events;
 pub mod flash_runner;
+pub mod storage;
+pub mod theme;
 pub mod ui;

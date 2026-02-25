@@ -8,11 +8,13 @@
 //!
 //! ```text
 //! flashkraft_tui
-//! ├── domain        ← re-exported from flashkraft_core::domain
-//! ├── core          ← re-exported from flashkraft_core (commands, flash_writer, …)
-//! ├── tui           ← Ratatui front-end (app / events / flash_runner / ui)
-//! └── file_explorer ← self-contained file-browser widget
+//! ├── domain  ← re-exported from flashkraft_core::domain
+//! ├── core    ← re-exported from flashkraft_core (commands, flash_writer, …)
+//! └── tui     ← Ratatui front-end (app / events / flash_runner / ui)
 //! ```
+//!
+//! The file-browser widget is provided by the [`tui-file-explorer`](https://crates.io/crates/tui-file-explorer)
+//! crate and consumed directly via `tui_file_explorer::*`.
 
 // ── Core re-exports ───────────────────────────────────────────────────────────
 
@@ -41,41 +43,12 @@ pub use flashkraft_core::domain;
 /// `flash_runner` (background flash task), `ui` (frame rendering).
 pub mod tui;
 
-/// Self-contained file-explorer widget for Ratatui (the TUI framework).
-///
-/// This module has **no flashkraft-specific dependencies** — only `ratatui`,
-/// `crossterm`, and the standard library — so it can be extracted and
-/// published as a stand-alone crate without modification.
-///
-/// ## Quick start
-///
-/// ```no_run
-/// use flashkraft_tui::file_explorer::{FileExplorer, ExplorerOutcome};
-///
-/// let mut explorer = FileExplorer::new(
-///     dirs::home_dir().unwrap_or_default(),
-///     vec!["iso".into(), "img".into()],
-/// );
-///
-/// // In your render function (inside a ratatui draw closure):
-/// // flashkraft_tui::file_explorer::render(&mut explorer, frame, frame.area());
-///
-/// // In your key handler:
-/// # let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Esc, crossterm::event::KeyModifiers::NONE);
-/// match explorer.handle_key(key) {
-///     ExplorerOutcome::Selected(path) => { /* use path */ }
-///     ExplorerOutcome::Dismissed      => { /* close explorer */ }
-///     _                               => {}
-/// }
-/// ```
-pub mod file_explorer;
-
 // ── Convenience re-exports for examples and tests ────────────────────────────
 
-pub use file_explorer::{ExplorerOutcome, FileExplorer, FsEntry};
 pub use tui::app::{App, AppScreen, FlashEvent, InputMode, UsbEntry};
 pub use tui::events::handle_key;
 pub use tui::ui::render;
+pub use tui_file_explorer::{ExplorerOutcome, FileExplorer, FsEntry};
 
 // ── Public event-loop API ─────────────────────────────────────────────────────
 

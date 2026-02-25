@@ -11,8 +11,8 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::app::{App, AppScreen, InputMode};
-use crate::file_explorer::ExplorerOutcome;
+use super::app::{App, AppScreen, ClipOp, FileOpMode, InputMode};
+use tui_file_explorer::ExplorerOutcome;
 
 /// Process a single key event and mutate `app` accordingly.
 ///
@@ -33,7 +33,56 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
             app.should_quit = true;
             return true;
         }
+        // Ctrl+T cycles the global app theme everywhere — including when the
+        // user is actively typing in the image-path text field.
+        KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.next_explorer_theme();
+            return true;
+        }
+        // T (uppercase / Shift+T) toggles the global theme panel on every screen.
+        KeyCode::Char('T') if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+            if app.show_app_theme_panel {
+                app.close_app_theme_panel();
+            } else {
+                app.open_app_theme_panel();
+            }
+            return true;
+        }
+        // Bare 't' cycles theme on every screen except when the user is
+        // actively typing in the image-path text field (SelectImage +
+        // Editing mode) — there 't' should be inserted as a character instead.
+        KeyCode::Char('t') if key.modifiers.is_empty() => {
+            let in_text_edit =
+                app.screen == AppScreen::SelectImage && app.input_mode == InputMode::Editing;
+            if !in_text_edit {
+                app.next_explorer_theme();
+                return true;
+            }
+        }
         _ => {}
+    }
+
+    // ── Global theme panel navigation (intercept before screen dispatch) ─────
+    if app.show_app_theme_panel {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.theme_panel_up();
+                return true;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                app.theme_panel_down();
+                return true;
+            }
+            KeyCode::Enter => {
+                app.theme_panel_confirm();
+                return true;
+            }
+            KeyCode::Esc => {
+                app.close_app_theme_panel();
+                return true;
+            }
+            _ => {}
+        }
     }
 
     // ── Screen-specific handling ─────────────────────────────────────────────
@@ -147,6 +196,76 @@ fn handle_select_image(app: &mut App, key: KeyEvent) -> bool {
 // ---------------------------------------------------------------------------
 
 fn handle_browse_image(app: &mut App, key: KeyEvent) -> bool {
+    // Clear stale file-op status on any new keypress.
+    app.file_op_status.clear();
+
+    // ── Confirmation modals take priority ─────────────────────────────────
+    match std::mem::replace(&mut app.file_op_mode, FileOpMode::Normal) {
+        FileOpMode::ConfirmDelete(path) => {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => app.explorer_do_delete(path),
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    app.file_op_status = "Delete cancelled.".to_string();
+                }
+                _ => {
+                    app.file_op_mode = FileOpMode::ConfirmDelete(path);
+                }
+            }
+            return true;
+        }
+        FileOpMode::ConfirmOverwrite { src, dst, op } => {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    app.explorer_do_paste(&src.clone(), &dst.clone(), op);
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    app.file_op_status = "Paste cancelled.".to_string();
+                }
+                _ => {
+                    app.file_op_mode = FileOpMode::ConfirmOverwrite { src, dst, op };
+                }
+            }
+            return true;
+        }
+        FileOpMode::Normal => {}
+    }
+
+    let searching = app.file_explorer.is_searching();
+
+    // ── Theme controls (only outside search) ──────────────────────────────
+    if !searching {
+        match key.code {
+            KeyCode::Char('t') if key.modifiers.is_empty() => {
+                app.next_explorer_theme();
+                return true;
+            }
+            KeyCode::Char('[') => {
+                app.prev_explorer_theme();
+                return true;
+            }
+
+            // ── File operations (only outside search) ─────────────────────
+            KeyCode::Char('y') if key.modifiers.is_empty() => {
+                app.explorer_yank(ClipOp::Copy);
+                return true;
+            }
+            KeyCode::Char('x') if key.modifiers.is_empty() => {
+                app.explorer_yank(ClipOp::Cut);
+                return true;
+            }
+            KeyCode::Char('p') if key.modifiers.is_empty() => {
+                app.explorer_initiate_paste();
+                return true;
+            }
+            KeyCode::Char('d') if key.modifiers.is_empty() => {
+                app.explorer_initiate_delete();
+                return true;
+            }
+            _ => {}
+        }
+    }
+
+    // ── Forward remaining keys to the explorer widget ─────────────────────
     let outcome = app.file_explorer.handle_key(key);
     match outcome {
         ExplorerOutcome::Selected(path) => {
@@ -1109,5 +1228,339 @@ mod tests {
         // Should still be on BrowseImage, just one level up.
         assert_eq!(app.screen, AppScreen::BrowseImage);
         assert_eq!(app.file_explorer.current_dir, tmp.path());
+    }
+
+    // ── Global theme cycling (t key) ──────────────────────────────────────────
+
+    #[test]
+    fn t_cycles_theme_on_select_drive() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        let initial_idx = app.explorer_theme_idx;
+        let consumed = handle_key(&mut app, key(KeyCode::Char('t')));
+        assert!(consumed, "'t' must be consumed on SelectDrive");
+        assert_eq!(
+            app.explorer_theme_idx,
+            (initial_idx + 1) % app.explorer_themes.len(),
+            "theme index must advance by 1"
+        );
+    }
+
+    #[test]
+    fn t_cycles_theme_on_drive_info() {
+        let mut app = app_on(AppScreen::DriveInfo);
+        let initial_idx = app.explorer_theme_idx;
+        let consumed = handle_key(&mut app, key(KeyCode::Char('t')));
+        assert!(consumed);
+        assert_eq!(
+            app.explorer_theme_idx,
+            (initial_idx + 1) % app.explorer_themes.len()
+        );
+    }
+
+    #[test]
+    fn t_cycles_theme_on_confirm_flash() {
+        let mut app = app_on(AppScreen::ConfirmFlash);
+        let initial_idx = app.explorer_theme_idx;
+        let consumed = handle_key(&mut app, key(KeyCode::Char('t')));
+        assert!(consumed);
+        assert_eq!(
+            app.explorer_theme_idx,
+            (initial_idx + 1) % app.explorer_themes.len()
+        );
+    }
+
+    #[test]
+    fn t_cycles_theme_on_complete() {
+        let mut app = app_on(AppScreen::Complete);
+        let initial_idx = app.explorer_theme_idx;
+        let consumed = handle_key(&mut app, key(KeyCode::Char('t')));
+        assert!(consumed);
+        assert_eq!(
+            app.explorer_theme_idx,
+            (initial_idx + 1) % app.explorer_themes.len()
+        );
+    }
+
+    #[test]
+    fn t_cycles_theme_on_error() {
+        let mut app = app_on(AppScreen::Error);
+        let initial_idx = app.explorer_theme_idx;
+        let consumed = handle_key(&mut app, key(KeyCode::Char('t')));
+        assert!(consumed);
+        assert_eq!(
+            app.explorer_theme_idx,
+            (initial_idx + 1) % app.explorer_themes.len()
+        );
+    }
+
+    #[test]
+    fn t_cycles_theme_on_select_image_normal_mode() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Normal;
+        let initial_idx = app.explorer_theme_idx;
+        let consumed = handle_key(&mut app, key(KeyCode::Char('t')));
+        assert!(
+            consumed,
+            "'t' must be consumed in Normal mode on SelectImage"
+        );
+        assert_eq!(
+            app.explorer_theme_idx,
+            (initial_idx + 1) % app.explorer_themes.len()
+        );
+    }
+
+    #[test]
+    fn t_inserts_char_on_select_image_editing_mode() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Editing;
+        let initial_idx = app.explorer_theme_idx;
+        let consumed = handle_key(&mut app, key(KeyCode::Char('t')));
+        assert!(
+            consumed,
+            "'t' must be consumed (as text input) in Editing mode"
+        );
+        assert_eq!(
+            app.explorer_theme_idx, initial_idx,
+            "theme index must NOT change when typing"
+        );
+        assert_eq!(
+            app.image_input, "t",
+            "character must be inserted into input"
+        );
+    }
+
+    #[test]
+    fn ctrl_t_cycles_theme_even_in_editing_mode() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Editing;
+        let initial_idx = app.explorer_theme_idx;
+        let consumed = handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL),
+        );
+        assert!(consumed, "Ctrl+T must be consumed in Editing mode");
+        assert_eq!(
+            app.explorer_theme_idx,
+            (initial_idx + 1) % app.explorer_themes.len(),
+            "theme index must advance even in Editing mode"
+        );
+        assert_eq!(
+            app.image_input, "",
+            "Ctrl+T must NOT insert text into the input field"
+        );
+    }
+
+    #[test]
+    fn ctrl_t_cycles_theme_on_every_screen() {
+        for screen in [
+            AppScreen::SelectImage,
+            AppScreen::SelectDrive,
+            AppScreen::DriveInfo,
+            AppScreen::ConfirmFlash,
+            AppScreen::Complete,
+            AppScreen::Error,
+        ] {
+            let mut app = app_on(screen.clone());
+            let initial_idx = app.explorer_theme_idx;
+            let consumed = handle_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL),
+            );
+            assert!(consumed, "Ctrl+T must be consumed on {screen:?}");
+            assert_eq!(
+                app.explorer_theme_idx,
+                (initial_idx + 1) % app.explorer_themes.len(),
+                "theme must advance on {screen:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn t_wraps_theme_index_around() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        let total = app.explorer_themes.len();
+        app.explorer_theme_idx = total - 1;
+        handle_key(&mut app, key(KeyCode::Char('t')));
+        assert_eq!(app.explorer_theme_idx, 0, "theme index must wrap to 0");
+    }
+
+    #[test]
+    fn t_and_app_palette_stay_in_sync() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        handle_key(&mut app, key(KeyCode::Char('t')));
+        // palette() should return the palette at the new index without panicking
+        let _pal = app.palette();
+        let expected_name = &app.explorer_themes[app.explorer_theme_idx].0;
+        assert_eq!(app.current_theme_name(), expected_name.as_str());
+    }
+
+    // ── Global theme panel (T key) ────────────────────────────────────────────
+
+    #[test]
+    fn capital_t_opens_theme_panel_on_any_screen() {
+        for screen in [
+            AppScreen::SelectImage,
+            AppScreen::SelectDrive,
+            AppScreen::DriveInfo,
+            AppScreen::ConfirmFlash,
+            AppScreen::Complete,
+            AppScreen::Error,
+        ] {
+            let mut app = app_on(screen.clone());
+            assert!(
+                !app.show_app_theme_panel,
+                "panel must start closed on {screen:?}"
+            );
+            let consumed = handle_key(&mut app, key(KeyCode::Char('T')));
+            assert!(consumed, "T must be consumed on {screen:?}");
+            assert!(app.show_app_theme_panel, "panel must open on {screen:?}");
+        }
+    }
+
+    #[test]
+    fn capital_t_closes_panel_when_already_open() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        app.open_app_theme_panel();
+        assert!(app.show_app_theme_panel);
+        let consumed = handle_key(&mut app, key(KeyCode::Char('T')));
+        assert!(consumed);
+        assert!(!app.show_app_theme_panel, "second T must close the panel");
+    }
+
+    #[test]
+    fn open_app_theme_panel_positions_cursor_at_active_theme() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        app.explorer_theme_idx = 5;
+        app.open_app_theme_panel();
+        assert_eq!(
+            app.app_theme_panel_cursor, 5,
+            "panel cursor must start at the active theme index"
+        );
+    }
+
+    #[test]
+    fn theme_panel_down_moves_cursor() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        app.open_app_theme_panel();
+        let initial = app.app_theme_panel_cursor;
+        let consumed = handle_key(&mut app, key(KeyCode::Down));
+        assert!(consumed);
+        assert_eq!(app.app_theme_panel_cursor, initial + 1);
+    }
+
+    #[test]
+    fn theme_panel_j_moves_cursor_down() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        app.open_app_theme_panel();
+        let initial = app.app_theme_panel_cursor;
+        let consumed = handle_key(&mut app, key(KeyCode::Char('j')));
+        assert!(consumed);
+        assert_eq!(app.app_theme_panel_cursor, initial + 1);
+    }
+
+    #[test]
+    fn theme_panel_up_moves_cursor() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        app.explorer_theme_idx = 3;
+        app.open_app_theme_panel();
+        let initial = app.app_theme_panel_cursor;
+        let consumed = handle_key(&mut app, key(KeyCode::Up));
+        assert!(consumed);
+        assert_eq!(app.app_theme_panel_cursor, initial - 1);
+    }
+
+    #[test]
+    fn theme_panel_k_moves_cursor_up() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        app.explorer_theme_idx = 3;
+        app.open_app_theme_panel();
+        let initial = app.app_theme_panel_cursor;
+        let consumed = handle_key(&mut app, key(KeyCode::Char('k')));
+        assert!(consumed);
+        assert_eq!(app.app_theme_panel_cursor, initial - 1);
+    }
+
+    #[test]
+    fn theme_panel_up_clamps_at_zero() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        app.open_app_theme_panel();
+        app.app_theme_panel_cursor = 0;
+        handle_key(&mut app, key(KeyCode::Up));
+        assert_eq!(app.app_theme_panel_cursor, 0, "cursor must clamp at 0");
+    }
+
+    #[test]
+    fn theme_panel_down_clamps_at_last() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        app.open_app_theme_panel();
+        let last = app.explorer_themes.len() - 1;
+        app.app_theme_panel_cursor = last;
+        handle_key(&mut app, key(KeyCode::Down));
+        assert_eq!(
+            app.app_theme_panel_cursor, last,
+            "cursor must clamp at last"
+        );
+    }
+
+    #[test]
+    fn theme_panel_enter_applies_cursor_theme_and_closes() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        app.open_app_theme_panel();
+        app.app_theme_panel_cursor = 4;
+        let consumed = handle_key(&mut app, key(KeyCode::Enter));
+        assert!(consumed);
+        assert_eq!(
+            app.explorer_theme_idx, 4,
+            "active theme must update to cursor position"
+        );
+        assert!(!app.show_app_theme_panel, "panel must close after Enter");
+    }
+
+    #[test]
+    fn theme_panel_esc_closes_without_changing_theme() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        app.explorer_theme_idx = 2;
+        app.open_app_theme_panel();
+        app.app_theme_panel_cursor = 7;
+        let consumed = handle_key(&mut app, key(KeyCode::Esc));
+        assert!(consumed);
+        assert!(!app.show_app_theme_panel, "panel must close on Esc");
+        assert_eq!(
+            app.explorer_theme_idx, 2,
+            "active theme must NOT change on Esc"
+        );
+    }
+
+    #[test]
+    fn theme_panel_navigation_does_not_affect_active_theme_until_enter() {
+        let mut app = app_on(AppScreen::SelectDrive);
+        app.explorer_theme_idx = 1;
+        app.open_app_theme_panel();
+        handle_key(&mut app, key(KeyCode::Down));
+        handle_key(&mut app, key(KeyCode::Down));
+        handle_key(&mut app, key(KeyCode::Down));
+        assert_eq!(
+            app.explorer_theme_idx, 1,
+            "active theme must not change while navigating the panel"
+        );
+    }
+
+    #[test]
+    fn theme_panel_intercepts_jk_even_on_complete_screen() {
+        // Normally j/k scroll USB contents on the Complete screen.
+        // When the theme panel is open those keys must go to the panel instead.
+        let mut app = app_complete_with_entries(20);
+        app.open_app_theme_panel();
+        app.app_theme_panel_cursor = 3;
+        let scroll_before = app.contents_scroll;
+        handle_key(&mut app, key(KeyCode::Char('j')));
+        assert_eq!(
+            app.app_theme_panel_cursor, 4,
+            "j must move panel cursor down"
+        );
+        assert_eq!(
+            app.contents_scroll, scroll_before,
+            "j must NOT scroll USB contents while panel is open"
+        );
     }
 }

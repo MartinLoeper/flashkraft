@@ -1418,6 +1418,7 @@ dependencies = [
  "dirs 5.0.1",
  "flashkraft-core",
  "ratatui",
+ "sled",
  "tempfile",
  "tokio",
  "tui-checkbox",

@@ -130,6 +130,14 @@ example-tui:
 example-tui-headless:
     cargo run -p flashkraft-tui --example headless_demo
 
+# Run the flash progress demo (animated tui-slider without real hardware)
+example-flash-progress:
+    cargo run -p flashkraft-tui --example flash_progress_demo
+
+# Run the file-explorer theme switcher demo
+example-theme-demo:
+    cargo run -p flashkraft-tui --example theme_demo
+
 # Run the detect_drives core example
 example-drives:
     cargo run -p flashkraft-core --example detect_drives
@@ -261,12 +269,16 @@ changelog-preview: _check-git-cliff
 bump version: check-all _check-git-cliff
     @echo "Bumping workspace version to {{version}}…"
     @echo "  All crates inherit the version via version.workspace = true"
-    @./scripts/bump_version.sh {{version}}
+    @./scripts/bump_version.sh --yes {{version}}
 
 # ── Publish (crates.io) ───────────────────────────────────────────────────────
 # Publish order must be: core → gui → tui (dependency order).
 # GUI and TUI are the only crates intended for public consumption; core is
 # published as a prerequisite because cargo requires resolved version deps.
+
+# Run the full pre-publish readiness check (fmt, clippy, tests, docs, dry-run)
+check-publish:
+    @./scripts/check_publish.sh
 
 # Dry-run publish for all three crates (in dependency order)
 publish-dry:

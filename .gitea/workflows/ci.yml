@@ -11,70 +11,172 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-# ensure that the workflow is only triggered once per PR, subsequent pushes to the PR will cancel
-# and restart the workflow. See https://docs.github.com/en/actions/using-jobs/using-concurrency
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  # ── 1. Formatting ────────────────────────────────────────────────────────────
   fmt:
     name: fmt
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install Rust stable
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable + rustfmt
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: check formatting
-        run: cargo fmt -- --check
+
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting (workspace)
+        run: cargo fmt --all -- --check
+
+  # ── 2. Clippy ────────────────────────────────────────────────────────────────
   clippy:
     name: clippy
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      checks: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install Rust stable
+      - uses: actions/checkout@v4
+
+      - name: Install Linux GUI system libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libxkbcommon-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libwayland-dev \
+            libgl1-mesa-dev \
+            libfontconfig1-dev \
+            libssl-dev
+
+      - name: Install Rust stable + clippy
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Run clippy action
-        uses: clechasseur/rs-clippy-check@v4
+
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
+
+      - name: Run clippy (workspace)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings -A deprecated
+
+  # ── 3. Tests ─────────────────────────────────────────────────────────────────
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux GUI system libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libxkbcommon-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libwayland-dev \
+            libgl1-mesa-dev \
+            libfontconfig1-dev \
+            libssl-dev
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Generate lockfile (if absent)
+        if: hashFiles('Cargo.lock') == ''
+        run: cargo generate-lockfile
+
+      - name: cargo test --workspace --locked
+        run: cargo test --locked --workspace --all-features --all-targets
+
+  # ── 4. Build (dev) ───────────────────────────────────────────────────────────
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux GUI system libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libxkbcommon-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libwayland-dev \
+            libgl1-mesa-dev \
+            libfontconfig1-dev \
+            libssl-dev
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build core (dev)
+        run: cargo build -p flashkraft-core
+
+      - name: Build GUI (dev)
+        run: cargo build -p flashkraft-gui
+
+      - name: Build TUI (dev)
+        run: cargo build -p flashkraft-tui
+
+  # ── 5. Docs ──────────────────────────────────────────────────────────────────
   doc:
-    # run docs generation on nightly rather than stable. This enables features like
-    # https://doc.rust-lang.org/beta/unstable-book/language-features/doc-cfg.html which allows an
-    # API be documented as only available in some specific platforms.
     name: doc
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Linux GUI system libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libxkbcommon-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libwayland-dev \
+            libgl1-mesa-dev \
+            libfontconfig1-dev \
+            libssl-dev
+
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
-      - name: Run cargo doc
-        run: cargo doc --no-deps --all-features
-        env:
-          RUSTDOCFLAGS: --cfg docsrs
-  test:
-    runs-on: ubuntu-latest
-    name: test
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      # enable this ci template to run regardless of whether the lockfile is checked in or not
-      - name: cargo generate-lockfile
-        if: hashFiles('Cargo.lock') == ''
-        run: cargo generate-lockfile
-      - name: cargo test --locked
-        run: cargo test --locked --all-features --all-targets
+
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
+
+      - name: cargo doc (flashkraft-gui)
+        run: cargo doc --no-deps -p flashkraft-gui --all-features
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
+
+      - name: cargo doc (flashkraft-tui)
+        run: cargo doc --no-deps -p flashkraft-tui --all-features
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings

@@ -11,8 +11,9 @@
 #   5. Commits everything
 #   6. Creates an annotated git tag
 #
-# Usage:   ./scripts/bump_version.sh <new_version>
+# Usage:   ./scripts/bump_version.sh [--yes] <new_version>
 # Example: ./scripts/bump_version.sh 0.5.0
+#          ./scripts/bump_version.sh --yes 0.5.0   # non-interactive (used by `just release`)
 
 set -euo pipefail
 
@@ -23,15 +24,25 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# ── Argument validation ───────────────────────────────────────────────────────
-if [ -z "${1:-}" ]; then
+# ── Argument parsing ──────────────────────────────────────────────────────────
+AUTO_YES=false
+NEW_VERSION=""
+
+for arg in "$@"; do
+    case "$arg" in
+        -y|--yes) AUTO_YES=true ;;
+        -*) echo -e "${RED}Error: unknown flag: $arg${NC}"; exit 1 ;;
+        *)  NEW_VERSION="$arg" ;;
+    esac
+done
+
+if [ -z "$NEW_VERSION" ]; then
     echo -e "${RED}Error: version number required${NC}"
-    echo "Usage: $0 <version>"
+    echo "Usage: $0 [--yes] <version>"
     echo "Example: $0 0.5.0"
+    echo "         $0 --yes 0.5.0   # non-interactive"
     exit 1
 fi
-
-NEW_VERSION="$1"
 
 if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo -e "${RED}Error: invalid version format '${NEW_VERSION}'${NC}"
@@ -66,11 +77,15 @@ echo -e "${CYAN}New version:     ${NEW_VERSION}${NC}"
 echo ""
 
 # ── Confirmation ──────────────────────────────────────────────────────────────
-read -p "Continue? (y/n) " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo -e "${YELLOW}Aborted.${NC}"
-    exit 0
+if $AUTO_YES; then
+    echo -e "${CYAN}Running non-interactively (--yes passed).${NC}"
+else
+    read -p "Continue? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}Aborted.${NC}"
+        exit 0
+    fi
 fi
 
 # ── Check for an existing tag ─────────────────────────────────────────────────

@@ -12,7 +12,7 @@ A lightning-fast, lightweight OS image writer built entirely in Rust. Choose you
 |---|---|---|
 | Framework | [Iced](https://github.com/iced-rs/iced) 0.13 | [Ratatui](https://github.com/ratatui-org/ratatui) 0.30 |
 | Input | Mouse + keyboard | Keyboard only |
-| Themes | 21 built-in Iced themes | Fixed brand palette |
+| Themes | 21 built-in Iced themes | Multiple themes via `tui-file-explorer` |
 | Best for | Desktop users | SSH / headless / minimal setups |
 
 No Electron, no shell scripts, no external tooling — pure Rust from UI to block device.
@@ -25,7 +25,17 @@ No Electron, no shell scripts, no external tooling — pure Rust from UI to bloc
 
 ### TUI (Ratatui terminal)
 
-![tui-demo-workflow](crates/flashkraft-tui/examples/vhs/generated/tui-demo-workflow.gif)
+#### Full workflow
+
+![tui-demo](crates/flashkraft-tui/examples/vhs/generated/tui-demo.gif)
+
+#### Flash progress (tui-slider)
+
+![flash-progress](crates/flashkraft-tui/examples/vhs/generated/flash-progress.gif)
+
+#### File explorer & theme switcher
+
+![theme-switcher](crates/flashkraft-tui/examples/vhs/generated/theme-switcher.gif)
 
 > **Note:** Demo GIFs are stored with [Git LFS](https://git-lfs.github.com/).
 > Run `git lfs install && git lfs pull` after cloning if the images appear broken.
@@ -55,7 +65,8 @@ No Electron, no shell scripts, no external tooling — pure Rust from UI to bloc
 - 📂 **Built-in file explorer** — browse and pick ISO files without leaving the terminal (`Tab` / `Ctrl+F`)
 - 📊 **Pie-chart drive overview** — storage breakdown rendered inline using `tui-piechart`
 - ✅ **Checkbox confirmation screen** — safety checklist before every flash via `tui-checkbox`
-- 🎚️ **Slider progress bar** — smooth flash-progress widget via `tui-slider`
+- 🎚️ **Slider progress bar** — smooth flash-progress widget via [`tui-slider`](https://crates.io/crates/tui-slider)
+- 🎨 **Multiple file-explorer themes** — switchable live with `t` / `[`, panel toggled with `T`, powered by [`tui-file-explorer`](https://crates.io/crates/tui-file-explorer)
 - 🖥️ **Works over SSH** — no display server required
 
 ## How flashing works
@@ -287,12 +298,11 @@ flashkraft/                              ← workspace root
 │   │   ├── examples/
 │   │   │   ├── basic_usage.rs
 │   │   │   ├── custom_theme.rs
-│   │   │   └── vhs/                    GUI VHS tapes
-│   │   │       ├── demo-basic.tape
-│   │   │       ├── demo-workflow.tape
-│   │   │       ├── demo-themes.tape
-│   │   │       ├── ...
-│   │   │       └── generated/          output GIFs (Git LFS, gitignored source)
+│   │   └── vhs/                    GUI VHS tapes
+│   │       ├── demo-basic.tape
+│   │       ├── demo-build.tape
+│   │       ├── demo-quick.tape
+│   │       └── generated/          output GIFs (Git LFS)
 │   │   └── src/
 │   │       ├── main.rs                  entry point + --flash-helper dispatch
 │   │       ├── lib.rs
@@ -318,12 +328,15 @@ flashkraft/                              ← workspace root
 │   └── flashkraft-tui/                  Ratatui terminal application
 │       ├── examples/
 │       │   ├── headless_demo.rs
-│   │   └── vhs/                    TUI VHS tapes
-│   │       ├── tui-demo-overview.tape
-│   │       ├── tui-demo-navigation.tape
-│   │       ├── tui-demo-file-browser.tape
-│   │       ├── tui-demo-workflow.tape
-│   │       └── generated/          output GIFs (Git LFS, gitignored source)
+│       │   ├── tui_demo.rs
+│       │   ├── flash_progress_demo.rs  ← tui-slider progress showcase
+│       │   └── theme_demo.rs           ← file-explorer theme switcher showcase
+│       └── vhs/                    TUI VHS tapes
+│           ├── tui-demo.tape
+│           ├── tui-headless.tape
+│           ├── flash-progress.tape
+│           ├── theme-switcher.tape
+│           └── generated/          output GIFs (Git LFS)
 │       └── src/
 │           ├── main.rs                  entry point + --flash-helper dispatch
 │           ├── lib.rs
@@ -337,7 +350,8 @@ flashkraft/                              ← workspace root
 │               └── mod.rs              built-in keyboard-driven file browser
 │
 ├── scripts/
-│   └── bump_version.sh
+│   ├── bump_version.sh
+│   └── check_publish.sh
 │
 └── .github/workflows/
     ├── ci.yml
@@ -391,7 +405,7 @@ Items marked ★ form the flash pipeline and are described in detail above.
 
 ## Demo GIFs & Git LFS
 
-All generated GIFs under `examples/vhs/` are tracked by [Git LFS](https://git-lfs.github.com/) (see `.gitattributes`).
+All generated GIFs under `examples/vhs/generated/` are tracked by [Git LFS](https://git-lfs.github.com/) (see `.gitattributes`).
 
 ```bash
 # One-time setup after cloning
@@ -400,19 +414,31 @@ git lfs install && git lfs pull   # or: just lfs-pull
 # Regenerate all demos (requires vhs installed)
 just vhs-all
 
-# Regenerate TUI demos only  (output: crates/flashkraft-tui/examples/vhs/)
+# Regenerate TUI demos only  (output: crates/flashkraft-tui/examples/vhs/generated/)
 just vhs-tui
 
-# Regenerate GUI demos only  (output: crates/flashkraft-gui/examples/vhs/)
+# Regenerate GUI demos only  (output: crates/flashkraft-gui/examples/vhs/generated/)
 just vhs-gui
 
-# Render a single tape
-just vhs-tape tui-demo-workflow
+# Render a single tape by name
+just vhs-tape tui-demo
+just vhs-tape flash-progress
+just vhs-tape theme-switcher
 just vhs-tape demo-basic
 
-# List all available tapes
+# List all available tapes and generated GIFs
 just vhs-list
 ```
+
+| Tape | What it shows |
+|---|---|
+| `tui-demo` | Full keyboard-driven wizard: image → drive → flash → complete |
+| `tui-headless` | Headless state-machine demo (no TTY required) |
+| `flash-progress` | Animated `tui-slider` progress bar during a simulated write |
+| `theme-switcher` | Live file-explorer theme cycling (`t` / `[`) and theme panel (`T`) |
+| `demo-basic` | GUI basic usage |
+| `demo-build` | GUI build walkthrough |
+| `demo-quick` | GUI quick-start |
 
 Install VHS:
 
@@ -435,6 +461,8 @@ cargo run -p flashkraft-gui --example custom_theme
 
 # TUI examples  (crates/flashkraft-tui/examples/)
 cargo run -p flashkraft-tui --example headless_demo
+cargo run -p flashkraft-tui --example flash_progress_demo   # animated tui-slider demo
+cargo run -p flashkraft-tui --example theme_demo            # file-explorer theme switcher
 ```
 
 ## Contributing

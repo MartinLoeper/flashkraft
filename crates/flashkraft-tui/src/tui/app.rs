@@ -15,7 +15,10 @@ use std::{
 use tokio::sync::mpsc;
 
 use crate::domain::{DriveInfo, ImageInfo};
-use crate::file_explorer::FileExplorer;
+use tui_file_explorer::{FileExplorer, Theme};
+
+use super::storage::TuiStorage;
+use super::theme::{all_app_themes, TuiPalette};
 
 // ---------------------------------------------------------------------------
 // Flash progress events (TUI-specific, Tokio-channel-based)
@@ -91,6 +94,37 @@ pub enum InputMode {
 }
 
 // ---------------------------------------------------------------------------
+// File-explorer clipboard / operation mode
+// ---------------------------------------------------------------------------
+
+/// Whether a file is being copied or moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipOp {
+    Copy,
+    Cut,
+}
+
+/// Pending clipboard entry for the file explorer.
+#[derive(Debug, Clone)]
+pub struct FileClipboard {
+    pub path: std::path::PathBuf,
+    pub op: ClipOp,
+}
+
+/// Confirmation modal state for the file explorer.
+#[derive(Debug, Default, Clone)]
+pub enum FileOpMode {
+    #[default]
+    Normal,
+    ConfirmDelete(std::path::PathBuf),
+    ConfirmOverwrite {
+        src: std::path::PathBuf,
+        dst: std::path::PathBuf,
+        op: ClipOp,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Main application state
 // ---------------------------------------------------------------------------
 
@@ -146,6 +180,24 @@ pub struct App {
     // ── File explorer ─────────────────────────────────────────────────────────
     /// File-browser state used on the `BrowseImage` screen.
     pub file_explorer: FileExplorer,
+    /// All available themes, as `(name, Theme)` pairs.
+    pub explorer_themes: Vec<(String, Theme)>,
+    /// All available app-level palettes, parallel to `explorer_themes`.
+    pub app_themes: Vec<(String, TuiPalette)>,
+    /// Index into `explorer_themes` / `app_themes` for the currently active theme.
+    pub explorer_theme_idx: usize,
+    /// Whether the global theme-picker side panel is visible (shown on every screen).
+    pub show_app_theme_panel: bool,
+    /// Cursor position inside the global theme panel (for keyboard navigation).
+    pub app_theme_panel_cursor: usize,
+    /// Sled-backed preference store — used to persist the active theme across restarts.
+    pub storage: TuiStorage,
+    /// Clipboard entry for copy/cut operations inside the file explorer.
+    pub file_clipboard: Option<FileClipboard>,
+    /// Pending confirmation mode for destructive file operations.
+    pub file_op_mode: FileOpMode,
+    /// Status message shown in the file-explorer overlay (e.g. "Yanked: foo.iso").
+    pub file_op_status: String,
 
     // ── Error ─────────────────────────────────────────────────────────────────
     /// Error message shown on the error screen.
@@ -191,6 +243,30 @@ impl App {
             usb_contents: Vec::new(),
             contents_scroll: 0,
             file_explorer: FileExplorer::new(start_dir, vec!["iso".into(), "img".into()]),
+            explorer_themes: Theme::all_presets()
+                .into_iter()
+                .map(|(name, _, t)| (name.to_string(), t))
+                .collect(),
+            app_themes: all_app_themes(),
+            explorer_theme_idx: {
+                // Resolve the saved theme index at construction time so we
+                // can use it as a plain usize field everywhere else.
+                let storage = TuiStorage::open();
+                let saved = storage.load_theme();
+                saved
+                    .and_then(|name| {
+                        Theme::all_presets()
+                            .into_iter()
+                            .position(|(n, _, _)| n == name)
+                    })
+                    .unwrap_or(0)
+            },
+            show_app_theme_panel: false,
+            app_theme_panel_cursor: 0,
+            storage: TuiStorage::open(),
+            file_clipboard: None,
+            file_op_mode: FileOpMode::Normal,
+            file_op_status: String::new(),
             error_message: String::new(),
             tick_count: 0,
             should_quit: false,
@@ -522,6 +598,171 @@ impl App {
     }
 
     // -----------------------------------------------------------------------
+    // File explorer — theme helpers
+    // -----------------------------------------------------------------------
+
+    /// The currently active file-explorer theme.
+    pub fn current_explorer_theme(&self) -> &Theme {
+        &self.explorer_themes[self.explorer_theme_idx].1
+    }
+
+    /// The currently active TUI application palette.
+    pub fn palette(&self) -> &TuiPalette {
+        &self.app_themes[self.explorer_theme_idx].1
+    }
+
+    /// The display name of the currently active theme.
+    pub fn current_theme_name(&self) -> &str {
+        &self.app_themes[self.explorer_theme_idx].0
+    }
+
+    /// Advance to the next theme (wraps around) and persist the choice.
+    pub fn next_explorer_theme(&mut self) {
+        self.explorer_theme_idx = (self.explorer_theme_idx + 1) % self.explorer_themes.len();
+        self.persist_theme();
+    }
+
+    /// Go back to the previous theme (wraps around) and persist the choice.
+    pub fn prev_explorer_theme(&mut self) {
+        let n = self.explorer_themes.len();
+        self.explorer_theme_idx = (self.explorer_theme_idx + n - 1) % n;
+        self.persist_theme();
+    }
+
+    // -----------------------------------------------------------------------
+    // Global theme panel
+    // -----------------------------------------------------------------------
+
+    /// Open the global theme panel, positioning the cursor at the active theme.
+    pub fn open_app_theme_panel(&mut self) {
+        self.app_theme_panel_cursor = self.explorer_theme_idx;
+        self.show_app_theme_panel = true;
+    }
+
+    /// Close the global theme panel without applying any change.
+    pub fn close_app_theme_panel(&mut self) {
+        self.show_app_theme_panel = false;
+    }
+
+    /// Move the theme-panel cursor up by one (clamps at 0).
+    pub fn theme_panel_up(&mut self) {
+        if self.app_theme_panel_cursor > 0 {
+            self.app_theme_panel_cursor -= 1;
+        }
+    }
+
+    /// Move the theme-panel cursor down by one (clamps at last entry).
+    pub fn theme_panel_down(&mut self) {
+        let last = self.explorer_themes.len().saturating_sub(1);
+        if self.app_theme_panel_cursor < last {
+            self.app_theme_panel_cursor += 1;
+        }
+    }
+
+    /// Apply the theme currently under the panel cursor, persist it, and close the panel.
+    pub fn theme_panel_confirm(&mut self) {
+        self.explorer_theme_idx = self.app_theme_panel_cursor;
+        self.show_app_theme_panel = false;
+        self.persist_theme();
+    }
+
+    /// Write the current theme name to the sled store.
+    fn persist_theme(&self) {
+        let name = &self.explorer_themes[self.explorer_theme_idx].0;
+        self.storage.save_theme(name);
+    }
+
+    // -----------------------------------------------------------------------
+    // File explorer — clipboard / file operations
+    // -----------------------------------------------------------------------
+
+    /// Yank (copy or cut) the currently highlighted entry.
+    pub fn explorer_yank(&mut self, op: ClipOp) {
+        if let Some(entry) = self.file_explorer.current_entry() {
+            let label = match op {
+                ClipOp::Copy => "Yanked",
+                ClipOp::Cut => "Cut",
+            };
+            self.file_op_status = format!("{}: {}", label, entry.name);
+            self.file_clipboard = Some(FileClipboard {
+                path: entry.path.clone(),
+                op,
+            });
+        }
+    }
+
+    /// Initiate a paste: if destination exists, request overwrite confirmation;
+    /// otherwise perform the operation immediately.
+    pub fn explorer_initiate_paste(&mut self) {
+        let Some(clip) = self.file_clipboard.clone() else {
+            self.file_op_status = "Clipboard is empty.".to_string();
+            return;
+        };
+        let dst = self
+            .file_explorer
+            .current_dir
+            .join(clip.path.file_name().unwrap_or_default());
+        if dst.exists() {
+            self.file_op_mode = FileOpMode::ConfirmOverwrite {
+                src: clip.path,
+                dst,
+                op: clip.op,
+            };
+        } else {
+            self.explorer_do_paste(&clip.path.clone(), &dst.clone(), clip.op);
+        }
+    }
+
+    /// Perform the actual copy/move after confirmation.
+    pub fn explorer_do_paste(&mut self, src: &std::path::Path, dst: &std::path::Path, op: ClipOp) {
+        match explorer_fs_copy(src, dst) {
+            Ok(()) => {
+                if op == ClipOp::Cut {
+                    if let Err(e) = explorer_fs_delete(src) {
+                        self.file_op_status = format!("Cut: copy OK but delete failed: {e}");
+                    } else {
+                        self.file_clipboard = None;
+                        self.file_op_status = format!(
+                            "Moved to {}",
+                            dst.file_name().unwrap_or_default().to_string_lossy()
+                        );
+                    }
+                } else {
+                    self.file_op_status = format!(
+                        "Copied to {}",
+                        dst.file_name().unwrap_or_default().to_string_lossy()
+                    );
+                }
+            }
+            Err(e) => self.file_op_status = format!("Paste failed: {e}"),
+        }
+        self.file_op_mode = FileOpMode::Normal;
+        self.file_explorer.reload();
+    }
+
+    /// Enter delete-confirmation mode for the highlighted entry.
+    pub fn explorer_initiate_delete(&mut self) {
+        if let Some(entry) = self.file_explorer.current_entry() {
+            self.file_op_mode = FileOpMode::ConfirmDelete(entry.path.clone());
+        }
+    }
+
+    /// Perform the delete after the user confirmed with y.
+    pub fn explorer_do_delete(&mut self, path: std::path::PathBuf) {
+        match explorer_fs_delete(&path) {
+            Ok(()) => {
+                self.file_op_status = format!(
+                    "Deleted: {}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                )
+            }
+            Err(e) => self.file_op_status = format!("Delete failed: {e}"),
+        }
+        self.file_op_mode = FileOpMode::Normal;
+        self.file_explorer.reload();
+    }
+
+    // -----------------------------------------------------------------------
     // USB content scanning (post-flash)
     // -----------------------------------------------------------------------
 
@@ -676,6 +917,34 @@ fn collect_entries(dir: &PathBuf, depth: usize, out: &mut Vec<UsbEntry>, max_dep
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// File-system helpers (used by file-op methods above)
+// ---------------------------------------------------------------------------
+
+fn explorer_fs_copy(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    use std::fs;
+    if src.is_dir() {
+        fs::create_dir_all(dst)?;
+        for entry in fs::read_dir(src)?.flatten() {
+            explorer_fs_copy(&entry.path(), &dst.join(entry.file_name()))?;
+        }
+    } else {
+        if let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(src, dst)?;
+    }
+    Ok(())
+}
+
+fn explorer_fs_delete(path: &std::path::Path) -> std::io::Result<()> {
+    if path.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+}
 
 #[cfg(test)]
 mod tests {
