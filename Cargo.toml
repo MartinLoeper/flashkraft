@@ -7,7 +7,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version      = "0.4.6"
+version      = "0.4.7"
 edition      = "2021"
 authors      = ["Sorin Irimies <sorinirimies@gmail.com>"]
 license      = "MIT"
@@ -36,14 +36,15 @@ iced_fonts   = { version = "0.1", features = ["bootstrap"] }
 rfd          = "0.15"
 
 # TUI (Ratatui)
-ratatui      = "0.30"
-crossterm    = "0.29"
-tui-slider   = { git = "https://github.com/sorinirimies/tui-slider" }
-tui-piechart = { git = "https://github.com/sorinirimies/tui-piechart" }
-tui-checkbox = { git = "https://github.com/sorinirimies/tui-checkbox" }
+ratatui              = "0.30"
+crossterm            = "0.29"
+tui-file-explorer    = "0.1.4"
+tui-slider   = "0.3.0"
+tui-piechart = "0.3.0"
+tui-checkbox = "0.4.3"
 
 # Internal crates
-flashkraft-core = { path = "crates/flashkraft-core", version = "0.4.6" }
+flashkraft-core = { path = "crates/flashkraft-core", version = "0.4.7" }
 
 [profile.dev]
 opt-level = 0
