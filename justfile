@@ -280,19 +280,28 @@ bump version: check-all _check-git-cliff
 check-publish:
     @./scripts/check_publish.sh
 
-# Dry-run publish for both published crates
+# Dry-run publish for all three crates (in dependency order)
 publish-dry:
+    @echo "Dry-run: flashkraft-core"
+    cargo publish --dry-run -p flashkraft-core
     @echo "Dry-run: flashkraft (GUI)"
     cargo publish --dry-run -p flashkraft-gui
     @echo "Dry-run: flashkraft-tui"
     cargo publish --dry-run -p flashkraft-tui
 
-# Publish flashkraft-gui as `flashkraft` then flashkraft-tui.
-# flashkraft-core is internal (publish = false) and never published directly.
-publish: publish-gui publish-tui
-    @echo "✅ flashkraft and flashkraft-tui published to crates.io!"
+# Publish all three in dependency order: core → gui → tui.
+# core must hit the crates.io index before gui and tui can resolve it.
+publish: publish-core publish-gui publish-tui
+    @echo "✅ flashkraft-core, flashkraft, and flashkraft-tui published to crates.io!"
 
-# Publish flashkraft-gui (the GUI binary, released as `flashkraft` on crates.io)
+# Publish flashkraft-core (required by gui and tui)
+publish-core:
+    @echo "📦 Publishing flashkraft-core…"
+    cargo publish -p flashkraft-core
+    @echo "⏳ Waiting 30 s for the index to propagate…"
+    sleep 30
+
+# Publish flashkraft-gui (released as `flashkraft` on crates.io)
 publish-gui:
     @echo "📦 Publishing flashkraft (GUI)…"
     cargo publish -p flashkraft-gui
