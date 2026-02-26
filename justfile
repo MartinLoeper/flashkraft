@@ -393,7 +393,7 @@ push-tags-all:
 # Full release flow (quality-gate → bump → push → CI triggers build & publish):
 #
 #   just release-preview          # see unreleased commits and current version
-#   just release 0.5.0            # bump + push to GitHub  → Release workflow fires
+#   just release 0.5.0            # bump + push to GitHub + dispatch workflow (requires gh CLI)
 #   just release-all 0.5.0        # bump + push to GitHub + Gitea → Release workflow fires
 #
 # Version is shared across all three crates via version.workspace = true —
@@ -402,21 +402,22 @@ push-tags-all:
 # If you want to bump locally first and push later:
 #   just bump 0.5.0               # runs quality-gate, commits, tags locally
 #   just push-release-all         # push branch + tags to all remotes
-#
-# ⚠️  After pushing, the Release workflow run is visible in the GitHub Actions
-#     tab under the tag ref — NOT in the commit "checks" popup (which only
-#     shows CI runs bound to the branch push).  If the tag push was received
-#     but the workflow did not appear, use:
-#
-#   just release-retrigger 0.5.0  # manually dispatch the Release workflow via gh CLI
 
-# Bump, commit, tag, then push to GitHub — Release workflow fires on the tag.
-# The run appears in the Actions tab under the tag ref, not the branch commit.
+# Bump, commit, tag, push to GitHub, then dispatch the Release workflow via gh CLI.
+# Requires: gh auth login  (GitHub CLI authenticated)
+# The workflow dispatch guarantees the release pipeline fires even if the tag
+# push event is silently dropped (e.g. race between branch + tag push).
 release version: (bump version)
+    @command -v gh >/dev/null 2>&1 || { \
+        echo "❌ GitHub CLI (gh) not found. Install from https://cli.github.com"; exit 1; \
+    }
     @echo "Pushing release v{{version}} to GitHub…"
     git push origin main
     git push origin "v{{version}}"
-    @echo "✅ Release v{{version}} pushed to GitHub — CI will build binaries & publish to crates.io."
+    @echo "Dispatching Release workflow for v{{version}}…"
+    gh workflow run release.yml --field tag=v{{version}}
+    @echo "✅ Release v{{version}} pushed and workflow dispatched — check progress at:"
+    @echo "   https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner)/actions"
 
 # Bump, commit, tag, then push to Gitea only.
 # Note: Gitea Actions must be enabled and the release.yml workflow must exist there.
@@ -437,6 +438,8 @@ release-all version: (bump version)
 
 # Push the latest commit and all tags to every remote (no bump).
 # Use this after `just bump <version>` when you want to push manually.
+# Unlike `just release`, this does NOT dispatch the workflow — the tag push
+# event alone must trigger it.
 push-release-all:
     git push origin main
     git push gitea main
@@ -444,16 +447,7 @@ push-release-all:
     git push gitea --tags
     @echo "✅ Latest commit + tags pushed to all remotes."
 
-# Re-trigger the Release workflow on GitHub for an existing tag via the gh CLI.
-# Requires: gh auth login  (GitHub CLI authenticated)
-# Use when: tag is already on the remote but the Release workflow did not fire.
-release-retrigger version:
-    @command -v gh >/dev/null 2>&1 || { \
-        echo "❌ GitHub CLI (gh) not found. Install from https://cli.github.com"; exit 1; \
-    }
-    @echo "Manually dispatching Release workflow for tag v{{version}}…"
-    gh workflow run release.yml --field tag=v{{version}}
-    @echo "✅ Dispatched — check progress at: https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner)/actions"
+
 
 # Force-sync Gitea with GitHub
 sync-gitea:
