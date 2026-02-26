@@ -2,9 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.2 - 2026-02-26
+### ♻️ Refactor
+- refactor: consolidate to single published flashkraft crate with gui/tui features
+- refactor: publish flashkraft (GUI) and flashkraft-tui, core is internal only
+### ✨ Features
+- feat: add update-deps just command and nightly dep update workflows
+### 🐛 Bug Fixes
+- fix: gate nix::libc import behind #[cfg(unix)] for Windows compat
+### 🔄 CI
+- ci: drop aarch64 and musl targets, keep x86_64-unknown-linux-gnu only
+- ci: add Windows x86_64 msvc target, fix cross-platform artifact staging
+- ci: add Windows cargo check job for core and tui
+### 🔧 Chores
+- chore: remove unnecessary sleep between crates.io publishes
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.1...v0.5.2
 ## 0.5.1 - 2026-02-26
 ### 🐛 Bug Fixes
 - fix: remove secrets condition from publish job — breaks workflow_dispatch
+### 🔧 Chores
+- chore: bump version to 0.5.1
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.0...v0.5.1
 ## 0.5.0 - 2026-02-26
 ### 🔄 Updated
