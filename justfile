@@ -423,10 +423,11 @@ push-tags-all:
 
 # Bump, commit, tag, then push to GitHub — the tag push automatically triggers
 # the Release workflow via `on: push: tags: v*`. No manual dispatch needed.
+# --follow-tags pushes the branch and tag in a single operation to prevent
+# GitHub from firing the release workflow twice.
 release version: (bump version)
     @echo "Pushing release v{{version}} to GitHub…"
-    git push origin main
-    git push origin "v{{version}}"
+    git push --follow-tags origin main
     @echo "✅ Release v{{version}} pushed — Release workflow will trigger automatically."
     @echo "   https://github.com/$(git remote get-url origin | sed 's/.*github.com[:/]//' | sed 's/\.git//')/actions"
 
@@ -434,17 +435,14 @@ release version: (bump version)
 # Note: Gitea Actions must be enabled and the release.yml workflow must exist there.
 release-gitea version: (bump version)
     @echo "Pushing release v{{version}} to Gitea…"
-    git push gitea main
-    git push gitea "v{{version}}"
+    git push --follow-tags gitea main
     @echo "✅ Release v{{version}} live on Gitea."
 
 # Bump, commit, tag, then push to both GitHub and Gitea.
 release-all version: (bump version)
     @echo "Pushing release v{{version}} to all remotes…"
-    git push origin main
-    git push gitea main
-    git push origin "v{{version}}"
-    git push gitea "v{{version}}"
+    git push --follow-tags origin main
+    git push --follow-tags gitea main
     @echo "✅ Release v{{version}} pushed to GitHub and Gitea!"
 
 # Push the latest commit and all tags to every remote (no bump).
