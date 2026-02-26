@@ -2,10 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.5 - 2026-02-26
+### 🐛 Bug Fixes
+- fix: silence unused variable warnings in flash_subscription.rs
+### 🔄 CI
+- ci: add flashkraft-gui to Windows check job — Iced supports Windows natively
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.4...v0.5.5
 ## 0.5.4 - 2026-02-26
 ### 🐛 Bug Fixes
 - fix: restore flashkraft-core publishing — required by gui and tui on crates.io
 - fix: remove --locked from cargo test in all CI workflows
+### 🔧 Chores
+- chore: bump version to 0.5.4
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.3...v0.5.4
 ## 0.5.3 - 2026-02-26
 ### 🔧 Chores
