@@ -2,9 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.7 - 2026-02-26
+### 🐛 Bug Fixes
+- fix: rename flashkraft-gui package to flashkraft for crates.io publishing
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.6...v0.5.7
 ## 0.5.6 - 2026-02-26
 ### 🐛 Bug Fixes
 - fix: skip publish if version already exists on crates.io
+### 🔧 Chores
+- chore: bump version to 0.5.6
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.5...v0.5.6
 ## 0.5.5 - 2026-02-26
 ### 🐛 Bug Fixes
