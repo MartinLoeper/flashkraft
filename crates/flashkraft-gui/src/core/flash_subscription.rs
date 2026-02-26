@@ -240,8 +240,8 @@ async fn run_flash_operation(
                         }
                     }
                 }
-                Err(e) => {
-                    flash_debug!("reader thread: read error: {e}");
+                Err(_e) => {
+                    flash_debug!("reader thread: read error: {_e}");
                     break;
                 }
             }
@@ -398,8 +398,8 @@ async fn run_flash_operation(
                 }
 
                 // ── Unknown / unrecognised output ────────────────────────────
-                ScriptLine::Unknown(raw) => {
-                    flash_debug!("unknown line: {raw:?}");
+                ScriptLine::Unknown(_raw) => {
+                    flash_debug!("unknown line: {_raw:?}");
                     // Silently ignore noise from pkexec / the system.
                 }
             }
@@ -468,11 +468,11 @@ async fn drain_remaining(
                     *last_progress = 1.0;
                 }
             }
-            ScriptLine::Size(n) => {
-                flash_debug!("drain: size = {n}");
+            ScriptLine::Size(_n) => {
+                flash_debug!("drain: size = {_n}");
             }
-            ScriptLine::DdExit(code) => {
-                flash_debug!("drain: dd exit code {code}");
+            ScriptLine::DdExit(_code) => {
+                flash_debug!("drain: dd exit code {_code}");
             }
             ScriptLine::Unknown(_) => {}
         }
