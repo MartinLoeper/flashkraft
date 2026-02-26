@@ -200,8 +200,8 @@ jobs:
   # ── 6. Windows compile check ─────────────────────────────────────────────────
   # Verifies the workspace compiles on Windows without running a full release
   # build or needing a Windows release runner.  Uses cargo check (no codegen)
-  # so it's fast.  The GUI crate is excluded — Iced's X11/Wayland deps don't
-  # apply on Windows and would need a different feature set to compile there.
+  # so it's fast.  Iced supports Windows natively via D3D12/WGL — no X11/Wayland
+  # libs needed, so the GUI check works here too.
   check-windows:
     name: check (windows)
     runs-on: windows-latest
@@ -223,3 +223,6 @@ jobs:
 
       - name: cargo check flashkraft-tui (Windows)
         run: cargo check -p flashkraft-tui --all-features
+
+      - name: cargo check flashkraft-gui (Windows)
+        run: cargo check -p flashkraft-gui --all-features
