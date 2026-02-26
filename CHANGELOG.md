@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - ci: add Windows cargo check job for core and tui
 ### 🔧 Chores
 - chore: remove unnecessary sleep between crates.io publishes
+- chore: bump version to 0.5.2
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.1...v0.5.2
 ## 0.5.1 - 2026-02-26
 ### 🐛 Bug Fixes
