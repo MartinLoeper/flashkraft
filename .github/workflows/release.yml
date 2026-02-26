@@ -330,8 +330,8 @@ jobs:
     name: Publish to crates.io
     needs: [validate, release]
     runs-on: ubuntu-latest
-    # Only run when the secret is present — skips silently in forks.
-    if: ${{ secrets.CRATES_IO_TOKEN != '' }}
+    # Note: if CRATES_IO_TOKEN secret is absent, the publish steps will fail
+    # with a clear auth error. Remove this job from `needs` to skip publishing.
     steps:
       - uses: actions/checkout@v4
         with:
