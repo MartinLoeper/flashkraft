@@ -101,8 +101,8 @@ jobs:
         if: hashFiles('Cargo.lock') == ''
         run: cargo generate-lockfile
 
-      - name: cargo test --workspace --locked
-        run: cargo test --locked --workspace --all-features --all-targets
+      - name: cargo test --workspace
+        run: cargo test --workspace --all-features --all-targets
 
   # ── 4. Build (dev) ───────────────────────────────────────────────────────────
   build:

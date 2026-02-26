@@ -101,7 +101,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings -A deprecated
 
       - name: Run tests (workspace)
-        run: cargo test --workspace --locked --all-features
+        run: cargo test --workspace --all-features
 
   # ── 2. Binary builds ─────────────────────────────────────────────────────────
   # Build GUI and TUI release binaries for each target platform.

@@ -115,8 +115,8 @@ jobs:
 
       # Run the full test suite.  GUI rendering tests are compile-only on a
       # headless runner (they never open a window), so they pass fine.
-      - name: cargo test --workspace --locked
-        run: cargo test --locked --workspace --all-features --all-targets
+      - name: cargo test --workspace
+        run: cargo test --workspace --all-features --all-targets
 
   # ── 4. Build (dev) ───────────────────────────────────────────────────────────
   build:
