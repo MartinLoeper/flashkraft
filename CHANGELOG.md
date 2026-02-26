@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.4 - 2026-02-26
+### 🐛 Bug Fixes
+- fix: restore flashkraft-core publishing — required by gui and tui on crates.io
+- fix: remove --locked from cargo test in all CI workflows
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.3...v0.5.4
+## 0.5.3 - 2026-02-26
+### 🔧 Chores
+- chore: bump version to 0.5.3
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.2...v0.5.3
 ## 0.5.2 - 2026-02-26
 ### ♻️ Refactor
 - refactor: consolidate to single published flashkraft crate with gui/tui features

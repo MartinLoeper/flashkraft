@@ -1382,7 +1382,7 @@ checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
 name = "flashkraft-core"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "dirs 5.0.1",
  "futures",
@@ -1396,7 +1396,7 @@ dependencies = [
 
 [[package]]
 name = "flashkraft-gui"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "dirs 5.0.1",
  "flashkraft-core",
@@ -1411,7 +1411,7 @@ dependencies = [
 
 [[package]]
 name = "flashkraft-tui"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -4738,9 +4738,9 @@ dependencies = [
 
 [[package]]
 name = "tui-file-explorer"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0802513106c78a007e6ffd7820be400c79efae8a7dc9b036599b2374d06de3a"
+checksum = "7f561a89552950a4834c6db363d533a17450549ccb43152054623784fe655f3a"
 dependencies = [
  "clap",
  "crossterm",
