@@ -2,9 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.3 - 2026-02-26
+### 🐛 Bug Fixes
+- fix: use --follow-tags to push branch and tag in one operation, preventing double release trigger
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.2...v0.6.3
 ## 0.6.2 - 2026-02-26
 ### 🐛 Bug Fixes
 - fix: copy README.md into all crate dirs before publishing so crates.io shows it
+### 🔧 Chores
+- chore: bump version to 0.6.2
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.1...v0.6.2
 ## 0.6.1 - 2026-02-26
 ### 🐛 Bug Fixes
