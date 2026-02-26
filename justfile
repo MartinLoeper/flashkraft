@@ -421,21 +421,14 @@ push-tags-all:
 #   just bump 0.5.0               # runs quality-gate, commits, tags locally
 #   just push-release-all         # push branch + tags to all remotes
 
-# Bump, commit, tag, push to GitHub, then dispatch the Release workflow via gh CLI.
-# Requires: gh auth login  (GitHub CLI authenticated)
-# The workflow dispatch guarantees the release pipeline fires even if the tag
-# push event is silently dropped (e.g. race between branch + tag push).
+# Bump, commit, tag, then push to GitHub — the tag push automatically triggers
+# the Release workflow via `on: push: tags: v*`. No manual dispatch needed.
 release version: (bump version)
-    @command -v gh >/dev/null 2>&1 || { \
-        echo "❌ GitHub CLI (gh) not found. Install from https://cli.github.com"; exit 1; \
-    }
     @echo "Pushing release v{{version}} to GitHub…"
     git push origin main
     git push origin "v{{version}}"
-    @echo "Dispatching Release workflow for v{{version}}…"
-    gh workflow run release.yml --field tag=v{{version}}
-    @echo "✅ Release v{{version}} pushed and workflow dispatched — check progress at:"
-    @echo "   https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner)/actions"
+    @echo "✅ Release v{{version}} pushed — Release workflow will trigger automatically."
+    @echo "   https://github.com/$(git remote get-url origin | sed 's/.*github.com[:/]//' | sed 's/\.git//')/actions"
 
 # Bump, commit, tag, then push to Gitea only.
 # Note: Gitea Actions must be enabled and the release.yml workflow must exist there.
@@ -466,6 +459,17 @@ push-release-all:
     @echo "✅ Latest commit + tags pushed to all remotes."
 
 
+
+# Manually re-trigger the Release workflow for an existing tag via the gh CLI.
+# Use this ONLY if the tag push was received but the workflow did not fire.
+# Requires: gh auth login  (GitHub CLI authenticated)
+release-retrigger version:
+    @command -v gh >/dev/null 2>&1 || { \
+        echo "❌ GitHub CLI (gh) not found. Install from https://cli.github.com"; exit 1; \
+    }
+    @echo "Manually dispatching Release workflow for tag v{{version}}…"
+    gh workflow run release.yml --field tag=v{{version}}
+    @echo "✅ Dispatched — check progress at: https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner)/actions"
 
 # Force-sync Gitea with GitHub
 sync-gitea:
