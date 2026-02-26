@@ -42,7 +42,7 @@ build-core:
 
 # Build only the GUI crate (dev)
 build-gui:
-    cargo build -p flashkraft-gui
+    cargo build -p flashkraft
 
 # Build only the TUI crate (dev)
 build-tui:
@@ -50,7 +50,7 @@ build-tui:
 
 # Build release binaries for GUI and TUI
 build-release:
-    cargo build --release -p flashkraft-gui
+    cargo build --release -p flashkraft
     cargo build --release -p flashkraft-tui
 
 # Build a static (musl) TUI binary — great for portable distribution
@@ -63,7 +63,7 @@ build-tui-musl:
 
 # Launch the Iced desktop GUI
 run-gui:
-    cargo run -p flashkraft-gui
+    cargo run -p flashkraft
 
 # Launch the Ratatui terminal UI
 run-tui:
@@ -84,7 +84,7 @@ test-core:
 
 # Test only the GUI crate
 test-gui:
-    cargo test -p flashkraft-gui --all-features
+    cargo test -p flashkraft --all-features
 
 # Test only the TUI crate
 test-tui:
@@ -116,11 +116,11 @@ check-all: fmt-check clippy test
 
 # Run the basic_usage GUI example
 example-basic:
-    cargo run -p flashkraft-gui --example basic_usage
+    cargo run -p flashkraft --example basic_usage
 
 # Run the custom_theme GUI example
 example-theme:
-    cargo run -p flashkraft-gui --example custom_theme
+    cargo run -p flashkraft --example custom_theme
 
 # Run the fully functional TUI application example
 example-tui:
@@ -223,7 +223,7 @@ lfs-pull:
 
 # Generate and open docs for the GUI crate
 doc-gui:
-    cargo doc --no-deps -p flashkraft-gui --open
+    cargo doc --no-deps -p flashkraft --open
 
 # Generate and open docs for the TUI crate
 doc-tui:
@@ -285,7 +285,7 @@ publish-dry:
     @echo "Dry-run: flashkraft-core"
     cargo publish --dry-run -p flashkraft-core
     @echo "Dry-run: flashkraft (GUI)"
-    cargo publish --dry-run -p flashkraft-gui
+    cargo publish --dry-run -p flashkraft
     @echo "Dry-run: flashkraft-tui"
     cargo publish --dry-run -p flashkraft-tui
 
@@ -304,7 +304,7 @@ publish-core:
 # Publish flashkraft-gui (released as `flashkraft` on crates.io)
 publish-gui:
     @echo "📦 Publishing flashkraft (GUI)…"
-    cargo publish -p flashkraft-gui
+    cargo publish -p flashkraft
 
 # Publish flashkraft-tui
 publish-tui:

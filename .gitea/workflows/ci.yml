@@ -137,7 +137,7 @@ jobs:
         run: cargo build -p flashkraft-core
 
       - name: Build GUI (dev)
-        run: cargo build -p flashkraft-gui
+        run: cargo build -p flashkraft
 
       - name: Build TUI (dev)
         run: cargo build -p flashkraft-tui
@@ -171,8 +171,8 @@ jobs:
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: cargo doc (flashkraft-gui)
-        run: cargo doc --no-deps -p flashkraft-gui --all-features
+      - name: cargo doc (flashkraft)
+        run: cargo doc --no-deps -p flashkraft --all-features
         env:
           RUSTDOCFLAGS: --cfg docsrs -D warnings
 

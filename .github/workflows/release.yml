@@ -171,7 +171,7 @@ jobs:
       # ── Build GUI ───────────────────────────────────────────────────────────
       - name: Build GUI release binary
         if: matrix.gui_binary != ''
-        run: cargo build --release -p flashkraft-gui --target ${{ matrix.target }}
+        run: cargo build --release -p flashkraft --target ${{ matrix.target }}
 
       # ── Stage artifacts ──────────────────────────────────────────────────────
       - name: Create dist directory
@@ -232,7 +232,7 @@ jobs:
             echo ""
             echo "### Desktop GUI (Iced)"
             echo "\`\`\`bash"
-            echo "cargo install flashkraft-gui"
+            echo "cargo install flashkraft"
             echo "\`\`\`"
             echo ""
             echo "### Terminal UI (Ratatui)"
@@ -272,7 +272,7 @@ jobs:
 
   # ── 4. Publish to crates.io ──────────────────────────────────────────────────
   # Order matters: core must be published first because gui and tui depend on it.
-  # flashkraft-gui is published as `flashkraft` (the GUI binary).
+  # flashkraft (crates/flashkraft-gui) is published as `flashkraft` (the GUI binary).
   # flashkraft-tui is published as `flashkraft-tui` (the TUI binary).
   publish:
     name: Publish to crates.io
@@ -323,7 +323,7 @@ jobs:
             sleep 30
           fi
 
-      # ── Step 2: publish flashkraft-gui (as `flashkraft`) ────────────────────
+      # ── Step 2: publish flashkraft (GUI) ────────────────────────────────────
       - name: Publish flashkraft (GUI)
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
@@ -332,8 +332,8 @@ jobs:
           if cargo search flashkraft | grep -q "^flashkraft = \"${VERSION}\""; then
             echo "⏭️  flashkraft@${VERSION} already on crates.io — skipping."
           else
-            echo "📦 Publishing flashkraft-gui as flashkraft…"
-            cargo publish -p flashkraft-gui --token "${CARGO_REGISTRY_TOKEN}"
+            echo "📦 Publishing flashkraft (GUI)…"
+            cargo publish -p flashkraft --token "${CARGO_REGISTRY_TOKEN}"
           fi
 
       # ── Step 3: publish flashkraft-tui ──────────────────────────────────────

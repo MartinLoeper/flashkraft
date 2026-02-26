@@ -151,7 +151,7 @@ jobs:
         run: cargo build -p flashkraft-core
 
       - name: Build GUI (dev)
-        run: cargo build -p flashkraft-gui
+        run: cargo build -p flashkraft
 
       - name: Build TUI (dev)
         run: cargo build -p flashkraft-tui
@@ -187,8 +187,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       # Build docs for the two published crates (core is an internal dep).
-      - name: cargo doc (flashkraft-gui)
-        run: cargo doc --no-deps -p flashkraft-gui --all-features
+      - name: cargo doc (flashkraft)
+        run: cargo doc --no-deps -p flashkraft --all-features
         env:
           RUSTDOCFLAGS: --cfg docsrs -D warnings
 
@@ -224,5 +224,5 @@ jobs:
       - name: cargo check flashkraft-tui (Windows)
         run: cargo check -p flashkraft-tui --all-features
 
-      - name: cargo check flashkraft-gui (Windows)
-        run: cargo check -p flashkraft-gui --all-features
+      - name: cargo check flashkraft (Windows)
+        run: cargo check -p flashkraft --all-features
