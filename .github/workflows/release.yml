@@ -123,24 +123,6 @@ jobs:
             suffix: ""
             install_gui_libs: true
 
-          # ── Linux x86_64 musl (static — runs without glibc) ─────────────────
-          # The GUI links against X11/Wayland so a fully static build is not
-          # practical there; we only produce the TUI musl binary.
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-latest
-            gui_binary: ""
-            tui_binary: flashkraft-tui
-            suffix: ""
-            install_gui_libs: false
-
-          # ── Linux aarch64 (dynamic) ──────────────────────────────────────────
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-latest
-            gui_binary: flashkraft
-            tui_binary: flashkraft-tui
-            suffix: ""
-            install_gui_libs: true
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -164,26 +146,6 @@ jobs:
             libfontconfig1-dev \
             libssl-dev
 
-      # ── musl toolchain (static TUI) ─────────────────────────────────────────
-      - name: Install musl tools
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: sudo apt-get install -y --no-install-recommends musl-tools
-
-      # ── aarch64 cross-compiler ───────────────────────────────────────────────
-      - name: Install aarch64 cross-compilation toolchain
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            gcc-aarch64-linux-gnu \
-            libxkbcommon-dev:arm64 \
-            libx11-dev:arm64 \
-            libwayland-dev:arm64 \
-            libfontconfig1-dev:arm64 || true
-          # Enable multi-arch so apt can fetch arm64 packages
-          sudo dpkg --add-architecture arm64
-          sudo apt-get update -qq || true
-
       - name: Install Rust stable + target
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -193,16 +155,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-
-      # ── Configure cross-linker for aarch64 ──────────────────────────────────
-      - name: Set up cross-linker env (aarch64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          mkdir -p .cargo
-          cat >> .cargo/config.toml <<'EOF'
-          [target.aarch64-unknown-linux-gnu]
-          linker = "aarch64-linux-gnu-gcc"
-          EOF
 
       # ── Build TUI (all targets) ──────────────────────────────────────────────
       - name: Build TUI release binary
