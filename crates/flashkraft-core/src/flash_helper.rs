@@ -21,6 +21,7 @@
 //! The caller (`flash_subscription.rs`) already knows how to parse all of
 //! these via `flash_writer::parse_script_line`.
 
+#[cfg(unix)]
 use nix::libc;
 use std::io::{self, Read, Write};
 use std::path::Path;
@@ -300,6 +301,7 @@ fn write_image(image_path: &str, device_path: &str, image_size: u64) -> Result<(
         .map_err(|e| format!("Buffer flush error: {e}"))?;
 
     // Retrieve the underlying file and call fsync to push data to the device.
+    #[cfg_attr(not(unix), allow(unused_variables))]
     let device_file = writer
         .into_inner()
         .map_err(|e| format!("BufWriter error: {e}"))?;
