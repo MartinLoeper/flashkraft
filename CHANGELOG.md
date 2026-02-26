@@ -2,9 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.0 - 2026-02-26
+### 🐛 Bug Fixes
+- fix: use cargo info instead of cargo search for reliable already-published check
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.9...v0.6.0
 ## 0.5.9 - 2026-02-26
 ### 🐛 Bug Fixes
 - fix: copy README.md into crates/flashkraft-gui before publishing to crates.io
+### 🔧 Chores
+- chore: bump version to 0.5.9
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.8...v0.5.9
 ## 0.5.8 - 2026-02-26
 ### 🐛 Bug Fixes
