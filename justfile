@@ -280,18 +280,29 @@ bump version: check-all _check-git-cliff
 check-publish:
     @./scripts/check_publish.sh
 
-# Dry-run publish for the flashkraft crate
+# Dry-run publish for both published crates
 publish-dry:
-    @echo "Dry-run: flashkraft (with gui + tui features)"
-    cargo publish --dry-run -p flashkraft
+    @echo "Dry-run: flashkraft (GUI)"
+    cargo publish --dry-run -p flashkraft-gui
+    @echo "Dry-run: flashkraft-tui"
+    cargo publish --dry-run -p flashkraft-tui
 
-# Publish the single flashkraft crate to crates.io.
-# flashkraft-core, flashkraft-gui, and flashkraft-tui are internal
-# (publish = false) and are bundled as path dependencies.
-publish:
-    @echo "📦 Publishing flashkraft…"
-    cargo publish -p flashkraft
-    @echo "✅ flashkraft published to crates.io!"
+# Publish flashkraft-gui as `flashkraft` then flashkraft-tui.
+# flashkraft-core is internal (publish = false) and never published directly.
+publish: publish-gui publish-tui
+    @echo "✅ flashkraft and flashkraft-tui published to crates.io!"
+
+# Publish flashkraft-gui (the GUI binary, released as `flashkraft` on crates.io)
+publish-gui:
+    @echo "📦 Publishing flashkraft (GUI)…"
+    cargo publish -p flashkraft-gui
+    @echo "⏳ Waiting 20 s for the index to propagate…"
+    sleep 20
+
+# Publish flashkraft-tui
+publish-tui:
+    @echo "📦 Publishing flashkraft-tui…"
+    cargo publish -p flashkraft-tui
 
 # Show what would be released without making any changes
 release-preview: _check-git-cliff
@@ -302,6 +313,9 @@ release-preview: _check-git-cliff
     @echo ""
     @echo "Workspace version:"
     @grep -A5 '^\[workspace\.package\]' Cargo.toml | grep '^version'
+    @echo ""
+    @echo "Published crates:  flashkraft (GUI)  •  flashkraft-tui (TUI)"
+    @echo "Internal crate:    flashkraft-core   (publish = false)"
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 

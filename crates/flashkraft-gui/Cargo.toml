@@ -6,7 +6,6 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "FlashKraft — OS image writer desktop application (Iced GUI)"
-publish = false
 categories = ["gui", "command-line-utilities", "filesystem"]
 keywords = ["imager", "disk", "usb", "iso", "flash"]
 

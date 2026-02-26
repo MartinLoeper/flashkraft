@@ -6,38 +6,6 @@ members = [
 ]
 resolver = "2"
 
-[package]
-name = "flashkraft"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
-description = "A lightning fast, low memory OS image writer — desktop GUI (Iced) and terminal UI (Ratatui)"
-categories = ["command-line-utilities", "filesystem"]
-keywords = ["imager", "disk", "usb", "iso", "flash"]
-readme = "README.md"
-
-[[bin]]
-name = "flashkraft"
-path = "src/main.rs"
-required-features = ["gui"]
-
-[[bin]]
-name = "flashkraft-tui"
-path = "src/main_tui.rs"
-required-features = ["tui"]
-
-[features]
-default = []
-gui = ["dep:flashkraft-gui"]
-tui = ["dep:flashkraft-tui", "dep:tokio", "dep:anyhow"]
-
-[dependencies]
-flashkraft-gui = { path = "crates/flashkraft-gui", optional = true }
-flashkraft-tui = { path = "crates/flashkraft-tui", optional = true }
-tokio  = { workspace = true, optional = true }
-anyhow = { workspace = true, optional = true }
 
 
 [workspace.package]
