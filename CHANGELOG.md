@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.4.8 - 2026-02-26
+### ➕ Added
+- Add TUI theme system, demos, and persistence
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.4.7...v0.4.8
+## 0.4.7 - 2026-02-25
+### 🔧 Chores
+- chore: bump version to 0.4.7
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.4.6...v0.4.7
 ## 0.4.6 - 2026-02-24
 ### ➕ Added
 - Add manual release trigger and tag validation to workflow
