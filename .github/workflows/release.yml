@@ -271,8 +271,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── 4. Publish to crates.io ──────────────────────────────────────────────────
-  # Order matters: core must be published before gui and tui because they
-  # declare it as a dependency.  Each step waits for the index to propagate.
+  # Only the top-level `flashkraft` crate is published.
+  # flashkraft-core, flashkraft-gui, and flashkraft-tui are internal
+  # (publish = false) and are bundled as path dependencies.
   publish:
     name: Publish to crates.io
     needs: [validate, release]
@@ -306,32 +307,10 @@ jobs:
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
 
-      # ── Step 1: publish flashkraft-core ─────────────────────────────────────
-      # GUI and TUI both depend on this; it must hit the crates.io index first.
-      - name: Publish flashkraft-core
+      - name: Publish flashkraft
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
-          echo "📦 Publishing flashkraft-core…"
-          cargo publish -p flashkraft-core --token "${CARGO_REGISTRY_TOKEN}"
-          echo "⏳ Waiting 30 s for the index to propagate…"
-          sleep 30
-
-      # ── Step 2: publish flashkraft-gui ──────────────────────────────────────
-      - name: Publish flashkraft-gui
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: |
-          echo "📦 Publishing flashkraft-gui…"
-          cargo publish -p flashkraft-gui --token "${CARGO_REGISTRY_TOKEN}"
-          echo "⏳ Waiting 20 s for the index to propagate…"
-          sleep 20
-
-      # ── Step 3: publish flashkraft-tui ──────────────────────────────────────
-      - name: Publish flashkraft-tui
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: |
-          echo "📦 Publishing flashkraft-tui…"
-          cargo publish -p flashkraft-tui --token "${CARGO_REGISTRY_TOKEN}"
-          echo "✅ All crates published!"
+          echo "📦 Publishing flashkraft…"
+          cargo publish -p flashkraft --token "${CARGO_REGISTRY_TOKEN}"
+          echo "✅ flashkraft published to crates.io!"

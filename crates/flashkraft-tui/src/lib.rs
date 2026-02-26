@@ -45,10 +45,19 @@ pub mod tui;
 
 // ── Convenience re-exports for examples and tests ────────────────────────────
 
+pub use flashkraft_core::flash_helper;
 pub use tui::app::{App, AppScreen, FlashEvent, InputMode, UsbEntry};
 pub use tui::events::handle_key;
 pub use tui::ui::render;
 pub use tui_file_explorer::{ExplorerOutcome, FileExplorer, FsEntry};
+
+// ── Flash helper entry point ──────────────────────────────────────────────────
+
+/// Entry point for `--flash-helper` mode (called when re-launched under pkexec).
+/// Writes structured progress lines to stdout and exits.
+pub fn run_flash_helper(image_path: &str, device_path: &str) {
+    flash_helper::run(image_path, device_path);
+}
 
 // ── Public event-loop API ─────────────────────────────────────────────────────
 

@@ -280,35 +280,18 @@ bump version: check-all _check-git-cliff
 check-publish:
     @./scripts/check_publish.sh
 
-# Dry-run publish for all three crates (in dependency order)
+# Dry-run publish for the flashkraft crate
 publish-dry:
-    @echo "Dry-run: flashkraft-core"
-    cargo publish --dry-run -p flashkraft-core
-    @echo "Dry-run: flashkraft-gui"
-    cargo publish --dry-run -p flashkraft-gui
-    @echo "Dry-run: flashkraft-tui"
-    cargo publish --dry-run -p flashkraft-tui
+    @echo "Dry-run: flashkraft (with gui + tui features)"
+    cargo publish --dry-run -p flashkraft
 
-# Publish flashkraft-core (prerequisite for the other two)
-publish-core:
-    @echo "📦 Publishing flashkraft-core…"
-    cargo publish -p flashkraft-core
-    @echo "⏳ Waiting 30 s for the index to propagate…"
-    sleep 30
-
-# Publish flashkraft-gui (requires core to already be on crates.io)
-publish-gui:
-    @echo "📦 Publishing flashkraft-gui…"
-    cargo publish -p flashkraft-gui
-
-# Publish flashkraft-tui (requires core to already be on crates.io)
-publish-tui:
-    @echo "📦 Publishing flashkraft-tui…"
-    cargo publish -p flashkraft-tui
-
-# Publish all three in the correct dependency order
-publish: publish-core publish-gui publish-tui
-    @echo "✅ All crates published to crates.io!"
+# Publish the single flashkraft crate to crates.io.
+# flashkraft-core, flashkraft-gui, and flashkraft-tui are internal
+# (publish = false) and are bundled as path dependencies.
+publish:
+    @echo "📦 Publishing flashkraft…"
+    cargo publish -p flashkraft
+    @echo "✅ flashkraft published to crates.io!"
 
 # Show what would be released without making any changes
 release-preview: _check-git-cliff
@@ -317,9 +300,8 @@ release-preview: _check-git-cliff
     @echo "Unreleased commits:"
     @git-cliff --unreleased
     @echo ""
-    @echo "Crate versions (all must match):"
+    @echo "Workspace version:"
     @grep -A5 '^\[workspace\.package\]' Cargo.toml | grep '^version'
-    @grep 'version\.workspace' crates/flashkraft-core/Cargo.toml crates/flashkraft-gui/Cargo.toml crates/flashkraft-tui/Cargo.toml
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 
