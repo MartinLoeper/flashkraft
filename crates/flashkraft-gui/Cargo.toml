@@ -1,5 +1,5 @@
 [package]
-name = "flashkraft-gui"
+name = "flashkraft"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

@@ -1381,21 +1381,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
-name = "flashkraft-core"
-version = "0.5.6"
-dependencies = [
- "dirs 5.0.1",
- "futures",
- "futures-timer",
- "nix",
- "sha2",
- "sled",
- "sysinfo",
- "tokio",
-]
-
-[[package]]
-name = "flashkraft-gui"
+name = "flashkraft"
 version = "0.5.6"
 dependencies = [
  "dirs 5.0.1",
@@ -1407,6 +1393,20 @@ dependencies = [
  "iced_fonts",
  "rfd",
  "sled",
+]
+
+[[package]]
+name = "flashkraft-core"
+version = "0.5.6"
+dependencies = [
+ "dirs 5.0.1",
+ "futures",
+ "futures-timer",
+ "nix",
+ "sha2",
+ "sled",
+ "sysinfo",
+ "tokio",
 ]
 
 [[package]]

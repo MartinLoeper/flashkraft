@@ -329,8 +329,8 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
-          if cargo search flashkraft-gui | grep -q "^flashkraft-gui = \"${VERSION}\""; then
-            echo "⏭️  flashkraft-gui@${VERSION} already on crates.io — skipping."
+          if cargo search flashkraft | grep -q "^flashkraft = \"${VERSION}\""; then
+            echo "⏭️  flashkraft@${VERSION} already on crates.io — skipping."
           else
             echo "📦 Publishing flashkraft-gui as flashkraft…"
             cargo publish -p flashkraft-gui --token "${CARGO_REGISTRY_TOKEN}"
