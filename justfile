@@ -327,9 +327,24 @@ release-preview: _check-git-cliff
 clean:
     cargo clean
 
-# Update all dependencies
+# Update all dependencies (Cargo.lock only)
 update:
     cargo update
+
+# Update dependencies, run the full quality gate, then commit and push if all green.
+# Aborts without committing if fmt, clippy, or tests fail.
+update-deps:
+    @echo "⬆️  Updating dependencies…"
+    cargo update
+    @echo "🔍 Running quality gate…"
+    cargo fmt --all -- --check
+    cargo clippy --workspace --all-targets --all-features -- -D warnings -A deprecated
+    cargo test --workspace --locked --all-features --all-targets
+    @echo "✅ All checks passed — committing dependency updates…"
+    git add Cargo.lock
+    git diff --cached --quiet || git commit -m "chore: update dependencies"
+    git push origin main
+    @echo "✅ Dependency updates pushed to GitHub."
 
 # Show outdated dependencies (requires cargo-outdated)
 outdated:
