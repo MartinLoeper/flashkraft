@@ -2,11 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.6 - 2026-02-26
+### 🐛 Bug Fixes
+- fix: skip publish if version already exists on crates.io
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.5...v0.5.6
 ## 0.5.5 - 2026-02-26
 ### 🐛 Bug Fixes
 - fix: silence unused variable warnings in flash_subscription.rs
 ### 🔄 CI
 - ci: add flashkraft-gui to Windows check job — Iced supports Windows natively
+### 🔧 Chores
+- chore: bump version to 0.5.5
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.4...v0.5.5
 ## 0.5.4 - 2026-02-26
 ### 🐛 Bug Fixes
