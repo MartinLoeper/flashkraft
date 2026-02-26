@@ -296,8 +296,6 @@ publish: publish-gui publish-tui
 publish-gui:
     @echo "📦 Publishing flashkraft (GUI)…"
     cargo publish -p flashkraft-gui
-    @echo "⏳ Waiting 20 s for the index to propagate…"
-    sleep 20
 
 # Publish flashkraft-tui
 publish-tui:

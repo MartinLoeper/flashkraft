@@ -315,8 +315,6 @@ jobs:
         run: |
           echo "📦 Publishing flashkraft-gui as flashkraft…"
           cargo publish -p flashkraft-gui --token "${CARGO_REGISTRY_TOKEN}"
-          echo "⏳ Waiting 20 s for the index to propagate…"
-          sleep 20
 
       # ── Step 2: publish flashkraft-tui ──────────────────────────────────────
       - name: Publish flashkraft-tui
