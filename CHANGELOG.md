@@ -2,9 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.1 - 2026-02-26
+### 🐛 Bug Fixes
+- fix: remove secrets condition from publish job — breaks workflow_dispatch
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.0...v0.5.1
 ## 0.5.0 - 2026-02-26
 ### 🔄 Updated
 - Update release flow to always dispatch workflow via gh CLI
+### 🔧 Chores
+- chore: bump version to 0.5.0
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.4.8...v0.5.0
 ## 0.4.8 - 2026-02-26
 ### ➕ Added
