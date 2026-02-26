@@ -313,24 +313,39 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
-          echo "📦 Publishing flashkraft-core…"
-          cargo publish -p flashkraft-core --token "${CARGO_REGISTRY_TOKEN}"
-          echo "⏳ Waiting 30 s for the index to propagate…"
-          sleep 30
+          VERSION="${{ needs.validate.outputs.version }}"
+          if cargo search flashkraft-core | grep -q "^flashkraft-core = \"${VERSION}\""; then
+            echo "⏭️  flashkraft-core@${VERSION} already on crates.io — skipping."
+          else
+            echo "📦 Publishing flashkraft-core…"
+            cargo publish -p flashkraft-core --token "${CARGO_REGISTRY_TOKEN}"
+            echo "⏳ Waiting 30 s for the index to propagate…"
+            sleep 30
+          fi
 
       # ── Step 2: publish flashkraft-gui (as `flashkraft`) ────────────────────
       - name: Publish flashkraft (GUI)
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
-          echo "📦 Publishing flashkraft-gui as flashkraft…"
-          cargo publish -p flashkraft-gui --token "${CARGO_REGISTRY_TOKEN}"
+          VERSION="${{ needs.validate.outputs.version }}"
+          if cargo search flashkraft-gui | grep -q "^flashkraft-gui = \"${VERSION}\""; then
+            echo "⏭️  flashkraft-gui@${VERSION} already on crates.io — skipping."
+          else
+            echo "📦 Publishing flashkraft-gui as flashkraft…"
+            cargo publish -p flashkraft-gui --token "${CARGO_REGISTRY_TOKEN}"
+          fi
 
       # ── Step 3: publish flashkraft-tui ──────────────────────────────────────
       - name: Publish flashkraft-tui
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
-          echo "📦 Publishing flashkraft-tui…"
-          cargo publish -p flashkraft-tui --token "${CARGO_REGISTRY_TOKEN}"
-          echo "✅ flashkraft-core, flashkraft, and flashkraft-tui published to crates.io!"
+          VERSION="${{ needs.validate.outputs.version }}"
+          if cargo search flashkraft-tui | grep -q "^flashkraft-tui = \"${VERSION}\""; then
+            echo "⏭️  flashkraft-tui@${VERSION} already on crates.io — skipping."
+          else
+            echo "📦 Publishing flashkraft-tui…"
+            cargo publish -p flashkraft-tui --token "${CARGO_REGISTRY_TOKEN}"
+          fi
+          echo "✅ Publish step complete."
