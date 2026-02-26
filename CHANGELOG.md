@@ -2,9 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.0 - 2026-02-26
+### 🔄 Updated
+- Update release flow to always dispatch workflow via gh CLI
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.4.8...v0.5.0
 ## 0.4.8 - 2026-02-26
 ### ➕ Added
 - Add TUI theme system, demos, and persistence
+### 🔧 Chores
+- chore: bump version to 0.4.8
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.4.7...v0.4.8
 ## 0.4.7 - 2026-02-25
 ### 🔧 Chores
