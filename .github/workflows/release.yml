@@ -123,6 +123,14 @@ jobs:
             suffix: ""
             install_gui_libs: true
 
+          # ── Windows x86_64 (MSVC) ────────────────────────────────────────────
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            gui_binary: flashkraft
+            tui_binary: flashkraft-tui
+            suffix: ".exe"
+            install_gui_libs: false
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -158,36 +166,23 @@ jobs:
 
       # ── Build TUI (all targets) ──────────────────────────────────────────────
       - name: Build TUI release binary
-        run: |
-          cargo build --release -p flashkraft-tui --target ${{ matrix.target }}
+        run: cargo build --release -p flashkraft-tui --target ${{ matrix.target }}
 
-      # ── Build GUI (non-musl targets only) ───────────────────────────────────
+      # ── Build GUI ───────────────────────────────────────────────────────────
       - name: Build GUI release binary
         if: matrix.gui_binary != ''
-        run: |
-          cargo build --release -p flashkraft-gui --target ${{ matrix.target }}
+        run: cargo build --release -p flashkraft-gui --target ${{ matrix.target }}
 
       # ── Stage artifacts ──────────────────────────────────────────────────────
-      - name: Stage release artifacts
-        run: |
-          mkdir -p dist
+      - name: Create dist directory
+        run: mkdir dist
 
-          TARGET="${{ matrix.target }}"
-          SUFFIX="${{ matrix.suffix }}"
+      - name: Stage TUI artifact
+        run: cp target/${{ matrix.target }}/release/flashkraft-tui${{ matrix.suffix }} dist/flashkraft-tui-${{ matrix.target }}${{ matrix.suffix }}
 
-          # TUI binary — always present
-          TUI_SRC="target/${TARGET}/release/flashkraft-tui${SUFFIX}"
-          TUI_DST="dist/flashkraft-tui-${TARGET}${SUFFIX}"
-          cp "${TUI_SRC}" "${TUI_DST}"
-          echo "Staged TUI: ${TUI_DST}"
-
-          # GUI binary — present for non-musl targets
-          if [ -n "${{ matrix.gui_binary }}" ]; then
-            GUI_SRC="target/${TARGET}/release/flashkraft${SUFFIX}"
-            GUI_DST="dist/flashkraft-gui-${TARGET}${SUFFIX}"
-            cp "${GUI_SRC}" "${GUI_DST}"
-            echo "Staged GUI: ${GUI_DST}"
-          fi
+      - name: Stage GUI artifact
+        if: matrix.gui_binary != ''
+        run: cp target/${{ matrix.target }}/release/flashkraft${{ matrix.suffix }} dist/flashkraft-gui-${{ matrix.target }}${{ matrix.suffix }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
