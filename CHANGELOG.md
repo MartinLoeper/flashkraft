@@ -2,9 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.1 - 2026-02-26
+### 🐛 Bug Fixes
+- fix: remove gh workflow dispatch from just release — tag push triggers it automatically, add release-retrigger as explicit fallback
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.0...v0.6.1
 ## 0.6.0 - 2026-02-26
 ### 🐛 Bug Fixes
 - fix: use cargo info instead of cargo search for reliable already-published check
+### 🔧 Chores
+- chore: bump version to 0.6.0
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.5.9...v0.6.0
 ## 0.5.9 - 2026-02-26
 ### 🐛 Bug Fixes
