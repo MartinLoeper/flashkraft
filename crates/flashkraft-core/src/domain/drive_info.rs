@@ -71,19 +71,6 @@ impl DriveInfo {
             disabled: false,
         }
     }
-
-    /// Get a display string for the drive
-    ///
-    /// # Returns
-    ///
-    /// A formatted string showing name, size, and mount point
-    #[allow(dead_code)]
-    pub fn display_string(&self) -> String {
-        format!(
-            "{} - {:.2} GB ({})",
-            self.name, self.size_gb, self.mount_point
-        )
-    }
 }
 
 impl PartialEq for DriveInfo {
@@ -95,17 +82,6 @@ impl PartialEq for DriveInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_drive_display_string() {
-        let drive = DriveInfo::new(
-            "USB Drive".to_string(),
-            "/media/usb".to_string(),
-            32.0,
-            "/dev/sdb".to_string(),
-        );
-        assert_eq!(drive.display_string(), "USB Drive - 32.00 GB (/media/usb)");
-    }
 
     #[test]
     fn test_drive_equality() {
