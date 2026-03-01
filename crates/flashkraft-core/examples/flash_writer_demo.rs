@@ -1,23 +1,12 @@
-//! Flash Writer Protocol Demo — flashkraft-core
+//! Flash Pipeline Demo — flashkraft-core
 //!
-//! Simulates a complete flash operation output stream and feeds every line
-//! through [`flashkraft_core::flash_writer::parse_script_line`], printing
-//! each parsed [`ScriptLine`] variant in a human-readable form.
+//! Demonstrates the in-process flash pipeline API introduced by the
+//! architecture refactor.  It runs a simulated flash operation against a
+//! temporary file pair (source image → target "device") and prints every
+//! [`FlashEvent`] received over the `std::sync::mpsc` channel.
 //!
-//! This is the same parser used by both the GUI subscription and the TUI
-//! flash-runner to interpret structured stdout from the privileged helper.
-//!
-//! # Wire protocol
-//!
-//! | Line prefix              | Parsed as            | Meaning                        |
-//! |--------------------------|----------------------|--------------------------------|
-//! | `STAGE:<name>`           | `Stage(FlashStage)`  | Pipeline stage transition      |
-//! | `SIZE:<bytes>`           | `Size(u64)`          | Total image size in bytes      |
-//! | `PROGRESS:<bytes>:<spd>` | `Progress(u64, f32)` | Write progress update          |
-//! | `LOG:<message>`          | `Log(String)`        | Informational status message   |
-//! | `ERROR:<message>`        | `Error(String)`      | Terminal error                 |
-//! | `<dd-style line>`        | `DdProgress(...)`    | Legacy dd carriage-return line |
-//! | `<number>+0 records out` | `DdExit(0)`          | dd clean exit                  |
+//! No root privileges are required — the target is a regular temp file, so
+//! the `seteuid(0)` path is never exercised.
 //!
 //! # Run
 //!
@@ -25,7 +14,11 @@
 //! cargo run -p flashkraft-core --example flash_writer_demo
 //! ```
 
-use flashkraft_core::flash_writer::{parse_script_line, FlashStage, ScriptLine};
+use flashkraft_core::flash_helper::{run_pipeline, FlashEvent, FlashStage};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Arc,
+};
 
 // ── Colour helpers (ANSI, no external dep) ───────────────────────────────────
 
@@ -42,75 +35,8 @@ const BLUE: &str = "\x1b[34m";
 fn main() {
     print_header();
 
-    // ── Section 1: Rust helper protocol (nominal flash) ──────────────────────
-    section("Rust helper — nominal flash (1 GiB image onto /dev/sdb)");
-
-    let nominal: &[&str] = &[
-        // Stage transitions
-        "STAGE:UNMOUNTING",
-        "LOG:Unmounting /dev/sdb1 (MNT_DETACH)…",
-        "LOG:Unmounting /dev/sdb2 (MNT_DETACH)…",
-        "LOG:All partitions detached.",
-        "STAGE:WRITING",
-        // Size announcement
-        "SIZE:1073741824",
-        // Progress updates (bytes written, speed MB/s)
-        "PROGRESS:67108864:28.4",
-        "PROGRESS:134217728:31.7",
-        "PROGRESS:268435456:33.1",
-        "PROGRESS:536870912:34.9",
-        "PROGRESS:805306368:35.2",
-        "PROGRESS:1073741824:34.8",
-        // Sync
-        "STAGE:SYNCING",
-        "LOG:fsync complete. Calling sync()…",
-        // Partition table re-read
-        "STAGE:REREADING",
-        "LOG:BLKRRPART ioctl succeeded — kernel sees new partition table.",
-        // Verification
-        "STAGE:VERIFYING",
-        "LOG:SHA-256(image) = a3f1c9d2e7b8041556fabe23cd90147738ccaef1d5bcf402910e8da672f193e",
-        "LOG:SHA-256(device[0..1073741824]) = a3f1c9d2e7b8041556fabe23cd90147738ccaef1d5bcf402910e8da672f193e",
-        "LOG:Verification passed ✓",
-        // Done
-        "STAGE:DONE",
-    ];
-
-    run_simulation(nominal);
-
-    // ── Section 2: Rust helper protocol (error path) ─────────────────────────
-    section("Rust helper — error path (device disappears mid-write)");
-
-    let error_path: &[&str] = &[
-        "STAGE:UNMOUNTING",
-        "LOG:Unmounting /dev/sdb1 (MNT_DETACH)…",
-        "STAGE:WRITING",
-        "SIZE:2147483648",
-        "PROGRESS:67108864:30.0",
-        "PROGRESS:134217728:31.2",
-        "ERROR:Write failed after 134217728 bytes: No space left on device (os error 28)",
-    ];
-
-    run_simulation(error_path);
-
-    // ── Section 3: Legacy dd output ──────────────────────────────────────────
-    section("Legacy dd output (carriage-return-delimited progress)");
-
-    let dd_lines: &[&str] = &[
-        // These are the \r-terminated lines dd emits to stderr / stdout
-        "67108864 bytes (67 MB, 64 MiB) copied, 2.1 s, 31.5 MB/s",
-        "268435456 bytes (268 MB, 256 MiB) copied, 8.3 s, 32.1 MB/s",
-        "536870912 bytes (537 MB, 512 MiB) copied, 16.1 s, 33.3 MB/s",
-        "1073741824 bytes (1.1 GB, 1.0 GiB) copied, 30.9 s, 34.7 MB/s",
-        // dd clean exit line
-        "2097152+0 records in",
-        "2097152+0 records out",
-    ];
-
-    run_simulation(dd_lines);
-
-    // ── Section 4: FlashStage Display ────────────────────────────────────────
-    section("FlashStage::Display round-trip");
+    // ── Section 1: FlashStage Display round-trip ──────────────────────────────
+    section("FlashStage::Display strings");
 
     let stages = [
         FlashStage::Starting,
@@ -123,156 +49,196 @@ fn main() {
         FlashStage::Failed("Simulated write error".to_string()),
     ];
 
-    // Wire-format keys that the helper actually emits for each stage.
-    // Starting and Failed have no dedicated STAGE: wire key (Starting is the
-    // implicit initial state; Failed arrives via ERROR: lines).
-    let wire_keys: &[Option<&str>] = &[
-        None, // Starting  — no wire key
-        Some("UNMOUNTING"),
-        Some("WRITING"),
-        Some("SYNCING"),
-        Some("REREADING"),
-        Some("VERIFYING"),
-        Some("DONE"),
-        None, // Failed    — no wire key (comes via ERROR:)
-    ];
-
-    for (stage, wire_key) in stages.iter().zip(wire_keys.iter()) {
-        let display = stage.to_string();
-
-        // Test the round-trip through the actual wire key (where one exists).
-        let round_trip = if let Some(key) = wire_key {
-            let line = format!("STAGE:{key}");
-            let parsed = parse_script_line(&line);
-            let ok = matches!(&parsed, ScriptLine::Stage(s) if *s == *stage);
-            if ok {
-                format!("{GREEN}✓ ok{RESET}")
-            } else {
-                format!("{RED}✗ mismatch{RESET}")
-            }
-        } else {
-            format!("{DIM}n/a{RESET}")
-        };
-
-        let wire_str = wire_key
-            .map(|k| format!("{CYAN}STAGE:{k}{RESET}"))
-            .unwrap_or_else(|| format!("{DIM}(none){RESET}"));
-
-        println!("  {BOLD}{display:<30}{RESET}  wire={wire_str:<50}  round-trip={round_trip}",);
+    for stage in &stages {
+        println!(
+            "  {BOLD}{:<12}{RESET}  →  {CYAN}{}{RESET}",
+            format!("{stage:?}").split('(').next().unwrap_or(""),
+            stage
+        );
     }
 
-    // ── Section 5: Edge cases ────────────────────────────────────────────────
-    section("Edge cases & unknown lines");
+    // ── Section 2: Live pipeline run against temp files ───────────────────────
+    section("Live run_pipeline — source image → temp target (no root needed)");
 
-    let edge: &[&str] = &[
-        // Leading/trailing whitespace
-        "  STAGE:WRITING  ",
-        // Unknown prefix — should parse as Unknown
-        "some random garbage line",
-        // Empty string
-        "",
-        // LOG with colon in the message
-        "LOG:Path is: /home/user/ubuntu-24.04.iso",
-        // PROGRESS with zero speed (stalled write)
-        "PROGRESS:1048576:0.0",
-        // SIZE of zero (degenerate)
-        "SIZE:0",
-    ];
+    // Write a 4 MiB source image so we get at least one progress event.
+    let image_file = tempfile("fk_demo_image_", 4 * 1024 * 1024);
+    let target_file = tempfile("fk_demo_target_", 4 * 1024 * 1024);
 
-    run_simulation(edge);
+    println!("  {DIM}image  : {}{RESET}", image_file.display());
+    println!("  {DIM}target : {}{RESET}", target_file.display());
+    println!();
+
+    let (tx, rx) = mpsc::channel::<FlashEvent>();
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let img = image_file.to_string_lossy().into_owned();
+    let dev = target_file.to_string_lossy().into_owned();
+    let cancel_clone = cancel.clone();
+
+    let thread = std::thread::spawn(move || {
+        run_pipeline(&img, &dev, tx, cancel_clone);
+    });
+
+    // Receive and pretty-print every event.
+    let mut event_count = 0usize;
+    let mut completed = false;
+
+    for event in &rx {
+        event_count += 1;
+        print_event(&event);
+        match event {
+            FlashEvent::Done | FlashEvent::Error(_) => {
+                completed = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    thread.join().expect("flash thread panicked");
+
+    println!();
+    if completed {
+        println!("  {GREEN}{BOLD}✓ Pipeline finished ({event_count} events received){RESET}");
+    } else {
+        println!("  {YELLOW}⚠ Channel closed without Done/Error ({event_count} events){RESET}");
+    }
+
+    // ── Section 3: Cancellation demo ─────────────────────────────────────────
+    section("Cancellation — cancel token set before pipeline writes anything");
+
+    // Use a large-ish image so the pipeline doesn't finish before we cancel.
+    let big_image = tempfile("fk_demo_big_", 16 * 1024 * 1024);
+    let big_target = tempfile("fk_demo_big_target_", 16 * 1024 * 1024);
+
+    let (tx2, rx2) = mpsc::channel::<FlashEvent>();
+    let cancel2 = Arc::new(AtomicBool::new(false));
+    let cancel2_clone = cancel2.clone();
+
+    let img2 = big_image.to_string_lossy().into_owned();
+    let dev2 = big_target.to_string_lossy().into_owned();
+
+    // Set the cancel flag immediately so the pipeline aborts after the first
+    // block at most.
+    cancel2.store(true, Ordering::SeqCst);
+
+    let thread2 = std::thread::spawn(move || {
+        run_pipeline(&img2, &dev2, tx2, cancel2_clone);
+    });
+
+    let mut cancel_events = Vec::new();
+    for event in &rx2 {
+        cancel_events.push(event.clone());
+        match event {
+            FlashEvent::Done | FlashEvent::Error(_) => break,
+            _ => {}
+        }
+    }
+    thread2.join().expect("cancel thread panicked");
+
+    for ev in &cancel_events {
+        print_event(ev);
+    }
+
+    let cancelled = cancel_events
+        .iter()
+        .any(|e| matches!(e, FlashEvent::Error(msg) if msg.to_lowercase().contains("cancel")));
+
+    println!();
+    if cancelled {
+        println!("  {GREEN}{BOLD}✓ Pipeline correctly reported cancellation{RESET}");
+    } else {
+        println!(
+            "  {YELLOW}ℹ Pipeline finished without explicit cancel message \
+             (may have completed before the flag was checked){RESET}"
+        );
+    }
+
+    // ── Cleanup ───────────────────────────────────────────────────────────────
+    let _ = std::fs::remove_file(&image_file);
+    let _ = std::fs::remove_file(&target_file);
+    let _ = std::fs::remove_file(&big_image);
+    let _ = std::fs::remove_file(&big_target);
 
     println!();
     println!("{BOLD}Demo complete.{RESET}");
     println!(
-        "{DIM}All lines above were processed by \
-         flashkraft_core::flash_writer::parse_script_line.{RESET}"
+        "{DIM}All events above were delivered via \
+         flashkraft_core::flash_helper::run_pipeline over std::sync::mpsc.{RESET}"
     );
     println!();
 }
 
-// ── Simulation driver ─────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn run_simulation(lines: &[&str]) {
-    for (i, &raw) in lines.iter().enumerate() {
-        let parsed = parse_script_line(raw);
-        let prefix = format!("{DIM}{:>3}.{RESET}", i + 1);
-        println!("{prefix} {}", format_raw(raw));
-        println!("     {}", format_parsed(&parsed));
-        println!();
-    }
+/// Create a named temp file filled with `size` zero bytes and return its path.
+fn tempfile(prefix: &str, size: usize) -> std::path::PathBuf {
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "{prefix}{}.bin",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0)
+    ));
+    std::fs::write(&path, vec![0u8; size]).expect("failed to create temp file");
+    path
 }
-
-// ── Formatting helpers ────────────────────────────────────────────────────────
-
-fn format_raw(raw: &str) -> String {
-    if raw.is_empty() {
-        format!("{DIM}(empty line){RESET}")
-    } else {
-        format!("{DIM}← {raw:?}{RESET}")
-    }
-}
-
-fn format_parsed(line: &ScriptLine) -> String {
-    match line {
-        ScriptLine::Stage(stage) => {
-            format!("{GREEN}{BOLD}Stage{RESET}({CYAN}{stage}{RESET})")
-        }
-        ScriptLine::Size(bytes) => {
-            format!(
-                "{GREEN}{BOLD}Size{RESET}({CYAN}{bytes}{RESET} bytes = {:.2} MiB)",
-                *bytes as f64 / 1_048_576.0
-            )
-        }
-        ScriptLine::Progress(bytes, speed) => {
-            format!(
-                "{GREEN}{BOLD}Progress{RESET}(written={CYAN}{:.1} MiB{RESET}, \
-                 speed={CYAN}{speed:.1} MB/s{RESET})",
-                *bytes as f64 / 1_048_576.0
-            )
-        }
-        ScriptLine::DdProgress(bytes, speed) => {
-            format!(
-                "{BLUE}{BOLD}DdProgress{RESET}(written={CYAN}{:.1} MiB{RESET}, \
-                 speed={CYAN}{speed:.1} MB/s{RESET})",
-                *bytes as f64 / 1_048_576.0
-            )
-        }
-        ScriptLine::DdExit(code) => {
-            let colour = if *code == 0 { GREEN } else { RED };
-            format!("{BLUE}{BOLD}DdExit{RESET}(code={colour}{code}{RESET})")
-        }
-        ScriptLine::Log(msg) => {
-            format!("{YELLOW}{BOLD}Log{RESET}({DIM}\"{msg}\"{RESET})")
-        }
-        ScriptLine::Error(msg) => {
-            format!("{RED}{BOLD}Error{RESET}({RED}\"{msg}\"{RESET})")
-        }
-        ScriptLine::Unknown(raw) => {
-            format!("{MAGENTA}{BOLD}Unknown{RESET}({DIM}\"{raw}\"{RESET})")
-        }
-    }
-}
-
-// ── UI chrome ─────────────────────────────────────────────────────────────────
 
 fn print_header() {
     println!();
-    println!("{BOLD}{CYAN}┌─────────────────────────────────────────────────────┐{RESET}");
-    println!(
-        "{BOLD}{CYAN}│{RESET}  {BOLD}flashkraft-core  ·  Flash Writer Protocol Demo{RESET}   \
-         {BOLD}{CYAN}│{RESET}"
-    );
-    println!("{BOLD}{CYAN}└─────────────────────────────────────────────────────┘{RESET}");
-    println!();
-    println!(
-        "Every line is parsed by {CYAN}parse_script_line(){RESET} \
-         and printed with its variant."
-    );
+    println!("{BOLD}{BLUE}╔══════════════════════════════════════════════════╗{RESET}");
+    println!("{BOLD}{BLUE}║  FlashKraft — Flash Pipeline Demo                ║{RESET}");
+    println!("{BOLD}{BLUE}╚══════════════════════════════════════════════════╝{RESET}");
     println!();
 }
 
 fn section(title: &str) {
-    let pad = "─".repeat(60usize.saturating_sub(title.len() + 4));
-    println!("{BOLD}── {title} {DIM}{pad}{RESET}");
     println!();
+    println!("{BOLD}{MAGENTA}── {title} {RESET}");
+    println!();
+}
+
+fn print_event(event: &FlashEvent) {
+    match event {
+        FlashEvent::Stage(stage) => {
+            println!("  {CYAN}[STAGE   ]{RESET}  {}", stage);
+        }
+        FlashEvent::Progress {
+            bytes_written,
+            total_bytes,
+            speed_mb_s,
+        } => {
+            let pct = if *total_bytes > 0 {
+                (*bytes_written as f64 / *total_bytes as f64 * 100.0) as u32
+            } else {
+                0
+            };
+            let bar = progress_bar(pct);
+            println!(
+                "  {GREEN}[PROGRESS]{RESET}  {bar} {pct:>3}%  \
+                 {bytes_written}/{total_bytes} bytes  \
+                 @ {speed_mb_s:.1} MB/s"
+            );
+        }
+        FlashEvent::Log(msg) => {
+            println!("  {DIM}[LOG     ]{RESET}  {msg}");
+        }
+        FlashEvent::Done => {
+            println!("  {GREEN}{BOLD}[DONE    ]{RESET}  Flash complete ✓");
+        }
+        FlashEvent::Error(msg) => {
+            println!("  {RED}{BOLD}[ERROR   ]{RESET}  {msg}");
+        }
+    }
+}
+
+fn progress_bar(pct: u32) -> String {
+    let filled = (pct as usize * 20 / 100).min(20);
+    let empty = 20 - filled;
+    format!(
+        "[{GREEN}{}{RESET}{}]",
+        "█".repeat(filled),
+        "░".repeat(empty)
+    )
 }

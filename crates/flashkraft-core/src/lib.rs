@@ -9,8 +9,7 @@
 //! | Module | What lives here |
 //! |--------|-----------------|
 //! | [`domain`] | Domain models — [`DriveInfo`], [`ImageInfo`], drive constraints |
-//! | [`flash_helper`] | Privileged flash pipeline executed via `pkexec` |
-//! | [`flash_writer`] | Wire-protocol parser for helper ↔ supervisor communication |
+//! | [`flash_helper`] | In-process flash pipeline — [`run_pipeline`], [`FlashEvent`], [`FlashStage`] |
 //! | [`commands`] | Async helpers — drive detection |
 //! | [`utils`] | Debug-logging macros (`debug_log!`, `flash_debug!`, …) |
 //!
@@ -30,8 +29,11 @@ pub mod utils;
 pub mod commands;
 pub mod domain;
 pub mod flash_helper;
-pub mod flash_writer;
 
 // ── Convenience re-exports ────────────────────────────────────────────────────
 
 pub use domain::{DriveInfo, ImageInfo};
+
+/// Re-export the flash pipeline event types so consumers only need to import
+/// from `flashkraft_core` rather than the sub-module path.
+pub use flash_helper::{FlashEvent, FlashStage};

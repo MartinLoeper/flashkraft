@@ -41,23 +41,18 @@ pub use core::{FlashKraft, Message};
 // ── GUI entry point ───────────────────────────────────────────────────────────
 
 /// Entry point for the Iced desktop GUI.
-/// Called by the published `flashkraft` crate's GUI binary.
+///
+/// The binary must be installed **setuid-root** for the flash pipeline to be
+/// able to open block devices:
+///
+/// ```text
+/// sudo chown root:root /usr/bin/flashkraft
+/// sudo chmod u+s       /usr/bin/flashkraft
+/// ```
+///
+/// The real UID is captured in `main.rs` before this function is called.
 pub fn run_gui() -> iced::Result {
     use iced::{Settings, Task};
-
-    let args: Vec<String> = std::env::args().collect();
-    if args.get(1).map(String::as_str) == Some("--flash-helper") {
-        let image_path = args.get(2).map(String::as_str).unwrap_or_else(|| {
-            eprintln!("flash-helper: missing <image_path> argument");
-            std::process::exit(2);
-        });
-        let device_path = args.get(3).map(String::as_str).unwrap_or_else(|| {
-            eprintln!("flash-helper: missing <device_path> argument");
-            std::process::exit(2);
-        });
-        flashkraft_core::flash_helper::run(image_path, device_path);
-        std::process::exit(0);
-    }
 
     iced::application(
         "FlashKraft - OS Image Writer",

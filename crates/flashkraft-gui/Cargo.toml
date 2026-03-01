@@ -21,6 +21,7 @@ path = "src/main.rs"
 [dependencies]
 # ── Shared core ───────────────────────────────────────────────────────────────
 flashkraft-core = { workspace = true }
+nix             = { workspace = true }
 
 # ── GUI framework ─────────────────────────────────────────────────────────────
 iced       = { workspace = true }

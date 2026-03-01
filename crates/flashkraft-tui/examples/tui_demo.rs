@@ -49,28 +49,15 @@
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // ── Privileged flash-helper mode ─────────────────────────────────────────
+    // ── Capture real UID for setuid-root privilege model ─────────────────────
     //
-    // When pkexec re-launches this binary with --flash-helper, skip the TUI
-    // entirely and run the synchronous flash pipeline instead.
-    let args: Vec<String> = std::env::args().collect();
-    if args.get(1).map(String::as_str) == Some("--flash-helper") {
-        let image_path = match args.get(2) {
-            Some(p) => p.as_str(),
-            None => {
-                eprintln!("flash-helper: missing <image_path> argument");
-                std::process::exit(2);
-            }
-        };
-        let device_path = match args.get(3) {
-            Some(p) => p.as_str(),
-            None => {
-                eprintln!("flash-helper: missing <device_path> argument");
-                std::process::exit(2);
-            }
-        };
-        flashkraft_core::flash_helper::run(image_path, device_path);
-        std::process::exit(0);
+    // If the binary is installed setuid-root, getuid() returns the invoking
+    // user's UID while geteuid() returns 0.  We store the real UID so the
+    // flash pipeline can drop back to it after opening the block device.
+    #[cfg(unix)]
+    {
+        let real_uid = nix::unistd::getuid();
+        flashkraft_core::flash_helper::set_real_uid(real_uid.as_raw());
     }
 
     // ── Banner (written before alternate screen opens) ────────────────────────

@@ -136,6 +136,7 @@ fn build_app() -> App {
         is_system: false,
         is_read_only: false,
         disabled: false,
+        usb_info: None,
     });
 
     // ── Wire up the synthetic flash channel ───────────────────────────────────

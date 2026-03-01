@@ -5,45 +5,37 @@
 //! tests can import from `flashkraft_tui::` without also pulling in the
 //! `main` function.
 //!
-//! ## Dual-mode binary
+//! ## Privilege model
 //!
-//! | Invocation                                         | Role                      |
-//! |----------------------------------------------------|---------------------------|
-//! | `flashkraft-tui`                                   | Normal TUI startup        |
-//! | `pkexec flashkraft-tui --flash-helper <img> <dev>` | Privileged flash helper   |
+//! The installed binary carries the **setuid-root** bit:
 //!
-//! The `--flash-helper` branch is entered automatically by
-//! [`flashkraft_tui::tui::flash_runner`] via `pkexec`; it writes structured
-//! progress lines to stdout and exits without touching any TUI code.
+//! ```text
+//! sudo chown root:root /usr/bin/flashkraft-tui
+//! sudo chmod u+s       /usr/bin/flashkraft-tui
+//! ```
+//!
+//! At startup we capture the **real** (unprivileged) UID via
+//! `nix::unistd::getuid()` and store it via
+//! `flashkraft_core::flash_helper::set_real_uid`.  The flash pipeline then
+//! uses it to drop back to the real user immediately after opening the block
+//! device file descriptor.
+//!
+//! No child process is spawned.  No pkexec.  No polkit policy file needed.
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // ── Privileged flash-helper mode ─────────────────────────────────────────
+    // ── Capture the real UID before anything else ────────────────────────────
     //
-    // When the application is re-launched under `pkexec` by the flash runner,
-    // the first argument will be `--flash-helper`.  In that mode we skip the
-    // TUI entirely, run the synchronous flash pipeline, and exit.
+    // If the binary is setuid-root, `getuid()` still returns the UID of the
+    // user who launched it (the *real* UID), while `geteuid()` returns 0.
+    // We save the real UID now so the flash pipeline can drop privileges back
+    // to the invoking user after opening the block device.
+    //
+    // On non-Unix platforms this block compiles away.
+    #[cfg(unix)]
     {
-        let args: Vec<String> = std::env::args().collect();
-        if args.get(1).map(String::as_str) == Some("--flash-helper") {
-            let image_path = match args.get(2) {
-                Some(p) => p.as_str(),
-                None => {
-                    eprintln!("flash-helper: missing <image_path> argument");
-                    std::process::exit(2);
-                }
-            };
-            let device_path = match args.get(3) {
-                Some(p) => p.as_str(),
-                None => {
-                    eprintln!("flash-helper: missing <device_path> argument");
-                    std::process::exit(2);
-                }
-            };
-
-            flashkraft_core::flash_helper::run(image_path, device_path);
-            std::process::exit(0);
-        }
+        let real_uid = nix::unistd::getuid();
+        flashkraft_core::flash_helper::set_real_uid(real_uid.as_raw());
     }
 
     // ── Normal TUI startup ────────────────────────────────────────────────────

@@ -16,8 +16,8 @@
 //!
 //! ## What does NOT live here
 //!
-//! - The actual flash pipeline (`flash_helper`, `flash_writer`) —
-//!   those are framework-free and live in `flashkraft-core`.
+//! - The actual flash pipeline (`flash_helper`) —
+//!   that is framework-free and lives in `flashkraft-core`.
 //! - Drive detection — also in `flashkraft-core::commands::drive_detection`.
 
 pub mod commands;
@@ -26,10 +26,6 @@ pub mod message;
 pub mod state;
 pub mod storage;
 pub mod update;
-
-// Re-export flash_writer from flashkraft_core so that
-// `crate::core::flash_writer::*` resolves in flash_subscription.rs.
-pub use flashkraft_core::flash_writer;
 
 // ── Convenience re-exports ────────────────────────────────────────────────────
 

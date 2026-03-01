@@ -19,14 +19,13 @@
 // ── Core re-exports ───────────────────────────────────────────────────────────
 
 /// Re-export `flashkraft_core` under the short alias `core` so that
-/// `crate::core::commands::load_drives()`, `crate::core::flash_writer::*`,
+/// `crate::core::commands::load_drives()`, `crate::core::flash_helper::*`,
 /// etc. resolve correctly from every submodule and from examples via
 /// `flashkraft_tui::core::*`.
 pub mod core {
     pub use flashkraft_core::commands;
     pub use flashkraft_core::domain;
     pub use flashkraft_core::flash_helper;
-    pub use flashkraft_core::flash_writer;
     pub use flashkraft_core::utils;
 }
 
@@ -50,14 +49,6 @@ pub use tui::app::{App, AppScreen, FlashEvent, InputMode, UsbEntry};
 pub use tui::events::handle_key;
 pub use tui::ui::render;
 pub use tui_file_explorer::{ExplorerOutcome, FileExplorer, FsEntry};
-
-// ── Flash helper entry point ──────────────────────────────────────────────────
-
-/// Entry point for `--flash-helper` mode (called when re-launched under pkexec).
-/// Writes structured progress lines to stdout and exits.
-pub fn run_flash_helper(image_path: &str, device_path: &str) {
-    flash_helper::run(image_path, device_path);
-}
 
 // ── Public event-loop API ─────────────────────────────────────────────────────
 

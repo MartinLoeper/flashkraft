@@ -30,6 +30,56 @@ install-tools:
     @command -v git-cliff >/dev/null 2>&1 || cargo install git-cliff
     @echo "✅ All tools installed!"
 
+# ── System install / uninstall ────────────────────────────────────────────────
+
+INSTALL_BIN     := "/usr/bin/flashkraft"
+INSTALL_BIN_TUI := "/usr/bin/flashkraft-tui"
+
+# Build a release binary and install it with the setuid-root bit.
+#
+# The setuid bit lets the flash pipeline call seteuid(0) for the single
+# instant needed to open a raw block device, then immediately drops back
+# to the real user — no pkexec, no polkit policy file required.
+#
+# Usage:  just install          (installs GUI binary)
+#         just install tui      (installs TUI binary)
+install target="gui":
+    #!/usr/bin/env sh
+    set -e
+
+    if [ "{{target}}" = "tui" ]; then
+        CRATE="flashkraft-tui"
+        BIN_SRC="target/release/flashkraft-tui"
+        BIN_DEST="{{INSTALL_BIN_TUI}}"
+    else
+        CRATE="flashkraft"
+        BIN_SRC="target/release/flashkraft"
+        BIN_DEST="{{INSTALL_BIN}}"
+    fi
+
+    echo "Building release binary for $CRATE…"
+    cargo build --release -p "$CRATE"
+
+    echo "Installing $BIN_SRC → $BIN_DEST (requires sudo)…"
+    sudo install -m 755 "$BIN_SRC" "$BIN_DEST"
+
+    # Set the setuid-root bit so the flash pipeline can open block devices.
+    echo "Setting setuid-root bit on $BIN_DEST…"
+    sudo chown root:root "$BIN_DEST"
+    sudo chmod u+s       "$BIN_DEST"
+
+    echo "✅ Installed $BIN_DEST (setuid-root)"
+
+# Remove the installed binary (GUI and/or TUI).
+uninstall:
+    #!/usr/bin/env sh
+    set -e
+    echo "Removing {{INSTALL_BIN}} …"
+    sudo rm -f "{{INSTALL_BIN}}"
+    echo "Removing {{INSTALL_BIN_TUI}} …"
+    sudo rm -f "{{INSTALL_BIN_TUI}}"
+    echo "✅ Uninstalled."
+
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 # Build the entire workspace (dev)
