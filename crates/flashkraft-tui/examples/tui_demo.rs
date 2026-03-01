@@ -11,7 +11,7 @@
 //! - Live drive detection    (r / F5)
 //! - Drive info + pie-chart
 //! - Confirm-flash checklist
-//! - Real flash progress via pkexec (requires a connected USB target)
+//! - Real flash progress (requires a connected USB target and setuid-root install)
 //!
 //! # Keyboard quick-reference
 //!
@@ -74,7 +74,10 @@ async fn main() -> anyhow::Result<()> {
     eprintln!("    4. Read the safety checklist, press y to flash");
     eprintln!("    5. Press q or Esc when done");
     eprintln!();
-    eprintln!("  Requires pkexec (polkit) for the actual flash step.");
+    eprintln!("  Requires setuid-root install for the actual flash step.");
+    eprintln!("  Run: sudo chown root:root /usr/bin/flashkraft-tui");
+    eprintln!("       sudo chmod u+s       /usr/bin/flashkraft-tui");
+    eprintln!("  Or:  just install tui");
     eprintln!("  ─────────────────────────────────────────────");
     eprintln!();
 

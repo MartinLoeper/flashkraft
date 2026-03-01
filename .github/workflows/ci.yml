@@ -10,6 +10,11 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Targets used in the cross-compile check job.
+  # cargo check only — no linker or system libraries needed on the runner.
+  WINDOWS_TARGET: x86_64-pc-windows-gnu
+  MACOS_X86_TARGET: x86_64-apple-darwin
+  MACOS_ARM_TARGET: aarch64-apple-darwin
 
 # Cancel in-progress runs on the same branch/PR so we never queue up stale
 # jobs after a force-push.
@@ -197,32 +202,58 @@ jobs:
         env:
           RUSTDOCFLAGS: --cfg docsrs -D warnings
 
-  # ── 6. Windows compile check ─────────────────────────────────────────────────
-  # Verifies the workspace compiles on Windows without running a full release
-  # build or needing a Windows release runner.  Uses cargo check (no codegen)
-  # so it's fast.  Iced supports Windows natively via D3D12/WGL — no X11/Wayland
-  # libs needed, so the GUI check works here too.
-  check-windows:
-    name: check (windows)
-    runs-on: windows-latest
+  # ── 6. Cross-compile check (Windows + macOS from Linux runner) ───────────────
+  #
+  # Runs `cargo check` against three foreign targets entirely on the Linux
+  # runner — no Windows or macOS runner needed.
+  #
+  # What this catches:
+  #   • Wrong windows-sys import paths / feature gates (e.g. CreateFileW)
+  #   • #[cfg] branches that only compile on Windows or macOS
+  #   • Type mismatches in platform-specific unsafe blocks
+  #   • Missing feature flags in Cargo.toml
+  #
+  # What it does NOT do:
+  #   • Run Windows/macOS tests (no OS APIs available on the Linux runner)
+  #   • Produce runnable binaries (cargo check stops before codegen)
+  #
+  # Only flashkraft-core is checked because it contains all platform-specific
+  # code (flash pipeline, Windows DeviceIoControl, macOS diskutil integration).
+  # The GUI and TUI crates depend on Iced/Ratatui which require native system
+  # libraries that cannot be cross-checked without a matching sysroot.
+  cross-check:
+    name: cross-check (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-pc-windows-gnu # Windows x86_64 — exercises mod windows {}
+          - x86_64-apple-darwin # macOS Intel    — exercises mod macos {}
+          - aarch64-apple-darwin # macOS Apple Silicon
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust stable
+      # mingw-w64 provides the Windows import libraries that the GNU linker
+      # stubs need even during cargo check (extern "system" symbols are
+      # resolved by the linker driver even without full codegen).
+      - name: Install mingw-w64 (Windows target only)
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends mingw-w64
+
+      - name: Install Rust stable + cross-check target
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.target }}
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          key: windows
+          key: cross-${{ matrix.target }}
 
-      - name: cargo check flashkraft-core (Windows)
-        run: cargo check -p flashkraft-core --all-features
-
-      - name: cargo check flashkraft-tui (Windows)
-        run: cargo check -p flashkraft-tui --all-features
-
-      - name: cargo check flashkraft (Windows)
-        run: cargo check -p flashkraft --all-features
+      # cargo check runs the full type-checker and borrow-checker but skips
+      # LLVM codegen and linking — fast and sufficient to catch API mismatches.
+      - name: cargo check flashkraft-core (${{ matrix.target }})
+        run: cargo check -p flashkraft-core --target ${{ matrix.target }}

@@ -36,3 +36,11 @@ futures-timer = { workspace = true }
 # ── Storage / persistence ─────────────────────────────────────────────────────
 sled = { workspace = true }
 dirs = { workspace = true }
+
+# ── Build dependencies ────────────────────────────────────────────────────────
+# winres embeds the UAC manifest into the Windows PE binary at compile time
+# so Windows shows the Administrator elevation prompt on launch.
+# It is NOT linked into the final binary — build-time only.
+# The target gate means it is not even fetched on Linux / macOS.
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winres = "0.1"

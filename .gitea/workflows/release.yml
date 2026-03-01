@@ -4,11 +4,21 @@ on:
   push:
     tags:
       - "v*"
+  # Manual fallback — trigger from the Gitea Actions UI if the tag push
+  # ever silently skips or a re-run is needed without re-pushing the tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.5.0) — must already exist on the repo"
+        required: true
+        default: ""
 
 permissions:
   contents: write
   packages: write
 
+# One release run at a time per tag.  Re-pushing the same tag cancels the
+# previous run instead of queuing a duplicate.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
@@ -18,6 +28,8 @@ env:
 
 jobs:
   # ── 0. Validate tag ──────────────────────────────────────────────────────────
+  # Resolve the effective tag from either a tag push or a manual dispatch, then
+  # validate it matches vX.Y.Z before spending time on any build work.
   validate:
     name: Validate tag
     runs-on: ubuntu-latest
@@ -28,7 +40,14 @@ jobs:
       - name: Resolve and validate tag
         id: resolve
         run: |
-          TAG="${{ github.ref_name }}"
+          # For a tag push  → github.ref_name is the tag (e.g. "v0.5.0")
+          # For manual runs → the user supplies it via the `tag` input
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+
           echo "Resolved tag: ${TAG}"
 
           if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -67,10 +86,11 @@ jobs:
             libfontconfig1-dev \
             libssl-dev
 
-      - name: Install Rust stable (rustfmt + clippy)
+      - name: Install Rust stable (rustfmt + clippy + cross targets)
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: x86_64-pc-windows-gnu,x86_64-apple-darwin,aarch64-apple-darwin
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
@@ -83,6 +103,23 @@ jobs:
 
       - name: Run tests (workspace)
         run: cargo test --workspace --all-features
+
+      # ── Cross-compile checks ─────────────────────────────────────────────────
+      # Verify platform-specific code (Windows DeviceIoControl, macOS diskutil)
+      # type-checks correctly before we spend time on binary builds.
+      - name: Install mingw-w64 (for Windows cross-check)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends mingw-w64
+
+      - name: cargo check core — x86_64-pc-windows-gnu
+        run: cargo check -p flashkraft-core --target x86_64-pc-windows-gnu
+
+      - name: cargo check core — x86_64-apple-darwin
+        run: cargo check -p flashkraft-core --target x86_64-apple-darwin
+
+      - name: cargo check core — aarch64-apple-darwin
+        run: cargo check -p flashkraft-core --target aarch64-apple-darwin
 
   # ── 2. Binary builds ─────────────────────────────────────────────────────────
   build:
@@ -181,7 +218,7 @@ jobs:
 
       - name: Build GUI release binary
         if: matrix.gui_binary != ''
-        run: cargo build --release -p flashkraft-gui --target ${{ matrix.target }}
+        run: cargo build --release -p flashkraft --target ${{ matrix.target }}
 
       - name: Stage release artifacts
         run: |
@@ -208,7 +245,7 @@ jobs:
           path: dist/
           retention-days: 1
 
-  # ── 3. GitHub Release ────────────────────────────────────────────────────────
+  # ── 3. Release ───────────────────────────────────────────────────────────────
   release:
     name: Create Release
     needs: [validate, build]
@@ -249,7 +286,7 @@ jobs:
             echo ""
             echo "### Desktop GUI (Iced)"
             echo "\`\`\`bash"
-            echo "cargo install flashkraft-gui"
+            echo "cargo install flashkraft"
             echo "\`\`\`"
             echo ""
             echo "### Terminal UI (Ratatui)"
@@ -260,6 +297,7 @@ jobs:
             echo "Or download a pre-built binary below."
           } >> RELEASE_NOTES.md
 
+          # Also update the full CHANGELOG.md
           git-cliff --config cliff.toml --output CHANGELOG.md
 
       - name: Download all artifacts
@@ -286,11 +324,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── 4. Publish to crates.io ──────────────────────────────────────────────────
-  # core must be published before gui and tui (they depend on it).
+  # Order matters: core must be published first because gui and tui depend on it.
+  # flashkraft (crates/flashkraft-gui) is published as `flashkraft` (the GUI binary).
+  # flashkraft-tui is published as `flashkraft-tui` (the TUI binary).
   publish:
     name: Publish to crates.io
     needs: [validate, release]
     runs-on: ubuntu-latest
+    # Skip gracefully if the secret is not configured rather than failing
+    # with an unhelpful auth error.
     if: ${{ secrets.CRATES_IO_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
@@ -319,28 +361,53 @@ jobs:
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
 
+      # ── Step 1: publish flashkraft-core ─────────────────────────────────────
+      # gui and tui both depend on this; it must hit the crates.io index first.
       - name: Publish flashkraft-core
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
-          echo "📦 Publishing flashkraft-core…"
-          cargo publish -p flashkraft-core --token "${CARGO_REGISTRY_TOKEN}"
-          echo "⏳ Waiting 30 s for the index to propagate…"
-          sleep 30
+          VERSION="${{ needs.validate.outputs.version }}"
+          if cargo info flashkraft-core@${VERSION} 2>/dev/null | grep -q "^flashkraft-core"; then
+            echo "⏭️  flashkraft-core@${VERSION} already on crates.io — skipping."
+          else
+            echo "📦 Copying README.md into crates/flashkraft-core…"
+            cp README.md crates/flashkraft-core/README.md
+            echo "📦 Publishing flashkraft-core…"
+            cargo publish -p flashkraft-core --token "${CARGO_REGISTRY_TOKEN}" --allow-dirty
+            echo "⏳ Waiting 30 s for the index to propagate…"
+            sleep 30
+          fi
 
-      - name: Publish flashkraft-gui
+      # ── Step 2: publish flashkraft (GUI) ────────────────────────────────────
+      - name: Publish flashkraft (GUI)
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
-          echo "📦 Publishing flashkraft-gui…"
-          cargo publish -p flashkraft-gui --token "${CARGO_REGISTRY_TOKEN}"
-          echo "⏳ Waiting 20 s for the index to propagate…"
-          sleep 20
+          VERSION="${{ needs.validate.outputs.version }}"
+          if cargo info flashkraft@${VERSION} 2>/dev/null | grep -q "^flashkraft"; then
+            echo "⏭️  flashkraft@${VERSION} already on crates.io — skipping."
+          else
+            echo "📦 Copying README.md into crates/flashkraft-gui…"
+            cp README.md crates/flashkraft-gui/README.md
+            echo "📦 Publishing flashkraft (GUI)…"
+            cargo publish -p flashkraft --token "${CARGO_REGISTRY_TOKEN}" --allow-dirty
+            echo "⏳ Waiting 20 s for the index to propagate…"
+            sleep 20
+          fi
 
+      # ── Step 3: publish flashkraft-tui ──────────────────────────────────────
       - name: Publish flashkraft-tui
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
-          echo "📦 Publishing flashkraft-tui…"
-          cargo publish -p flashkraft-tui --token "${CARGO_REGISTRY_TOKEN}"
-          echo "✅ All crates published!"
+          VERSION="${{ needs.validate.outputs.version }}"
+          if cargo info flashkraft-tui@${VERSION} 2>/dev/null | grep -q "^flashkraft-tui"; then
+            echo "⏭️  flashkraft-tui@${VERSION} already on crates.io — skipping."
+          else
+            echo "📦 Copying README.md into crates/flashkraft-tui…"
+            cp README.md crates/flashkraft-tui/README.md
+            echo "📦 Publishing flashkraft-tui…"
+            cargo publish -p flashkraft-tui --token "${CARGO_REGISTRY_TOKEN}" --allow-dirty
+          fi
+          echo "✅ Publish step complete."

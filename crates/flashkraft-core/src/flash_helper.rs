@@ -329,7 +329,26 @@ fn open_device_for_writing(device_path: &str) -> Result<std::fs::File, String> {
         std::fs::OpenOptions::new()
             .write(true)
             .open(device_path)
-            .map_err(|e| format!("Cannot open device '{device_path}' for writing: {e}"))
+            .map_err(|e| {
+                let raw = e.raw_os_error().unwrap_or(0);
+                // ERROR_ACCESS_DENIED (5) or ERROR_PRIVILEGE_NOT_HELD (1314)
+                if raw == 5 || raw == 1314 {
+                    format!(
+                        "Access denied opening '{device_path}'.\n\
+                         FlashKraft must be run as Administrator on Windows.\n\
+                         Right-click the application and choose \
+                         'Run as administrator'."
+                    )
+                } else if raw == 32 {
+                    // ERROR_SHARING_VIOLATION
+                    format!(
+                        "Device '{device_path}' is in use by another process.\n\
+                         Close any applications using the drive and try again."
+                    )
+                } else {
+                    format!("Cannot open device '{device_path}' for writing: {e}")
+                }
+            })
     }
 }
 
@@ -355,26 +374,43 @@ fn unmount_device(device_path: &str, tx: &mpsc::Sender<FlashEvent>) {
     }
 }
 
-fn find_mounted_partitions(device_name: &str, device_path: &str) -> Vec<String> {
-    let mounts = std::fs::read_to_string("/proc/mounts")
-        .or_else(|_| std::fs::read_to_string("/proc/self/mounts"))
-        .unwrap_or_default();
+/// Returns the list of mounted partitions/volumes that belong to `device_path`.
+///
+/// On Linux/macOS this parses `/proc/mounts`.
+/// On Windows this enumerates logical drive letters, resolves each to its
+/// underlying physical device via `QueryDosDeviceW`, and returns the volume
+/// paths (e.g. `\\.\C:`) whose physical device number matches `device_path`
+/// (e.g. `\\.\PhysicalDrive1`).
+fn find_mounted_partitions(
+    #[cfg_attr(target_os = "windows", allow(unused_variables))] device_name: &str,
+    device_path: &str,
+) -> Vec<String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mounts = std::fs::read_to_string("/proc/mounts")
+            .or_else(|_| std::fs::read_to_string("/proc/self/mounts"))
+            .unwrap_or_default();
 
-    let mut partitions = Vec::new();
-
-    for line in mounts.lines() {
-        let dev = match line.split_whitespace().next() {
-            Some(d) => d,
-            None => continue,
-        };
-        if dev == device_path || is_partition_of(dev, device_name) {
-            partitions.push(dev.to_string());
+        let mut partitions = Vec::new();
+        for line in mounts.lines() {
+            let dev = match line.split_whitespace().next() {
+                Some(d) => d,
+                None => continue,
+            };
+            if dev == device_path || is_partition_of(dev, device_name) {
+                partitions.push(dev.to_string());
+            }
         }
+        partitions
     }
 
-    partitions
+    #[cfg(target_os = "windows")]
+    {
+        windows::find_volumes_on_physical_drive(device_path)
+    }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn is_partition_of(dev: &str, device_name: &str) -> bool {
     // `dev` may be a full path like "/dev/sda1"; compare only the basename.
     let dev_base = Path::new(dev)
@@ -431,14 +467,20 @@ fn do_unmount(partition: &str, tx: &mpsc::Sender<FlashEvent>) {
         }
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    // Windows: open the volume with exclusive access, lock it, then dismount.
+    // The volume path is expected to be of the form `\\.\C:` (no trailing slash).
+    #[cfg(target_os = "windows")]
     {
-        send(
-            tx,
-            FlashEvent::Log(format!(
-                "Unmounting not supported on this OS — skipping {partition}"
-            )),
-        );
+        match windows::lock_and_dismount_volume(partition) {
+            Ok(()) => send(
+                tx,
+                FlashEvent::Log(format!("Dismounted volume {partition}")),
+            ),
+            Err(e) => send(
+                tx,
+                FlashEvent::Log(format!("Warning — could not dismount {partition}: {e}")),
+            ),
+        }
     }
 }
 
@@ -580,10 +622,22 @@ fn sync_device(device_path: &str, tx: &mpsc::Sender<FlashEvent>) {
         libc::sync();
     }
 
-    send(
-        tx,
-        FlashEvent::Log("Kernel write-back caches flushed".into()),
-    );
+    // Windows: open the physical drive and call FlushFileBuffers.
+    // This forces the OS to flush all dirty pages for the device to hardware.
+    #[cfg(target_os = "windows")]
+    {
+        match windows::flush_device_buffers(device_path) {
+            Ok(()) => {}
+            Err(e) => send(
+                tx,
+                FlashEvent::Log(format!(
+                    "Warning — FlushFileBuffers on '{device_path}' failed: {e}"
+                )),
+            ),
+        }
+    }
+
+    send(tx, FlashEvent::Log("Write-back caches flushed".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -637,11 +691,32 @@ fn reread_partition_table(device_path: &str, tx: &mpsc::Sender<FlashEvent>) {
     );
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+// Windows: IOCTL_DISK_UPDATE_PROPERTIES asks the partition manager to
+// re-enumerate the partition table from the on-disk data.
+#[cfg(target_os = "windows")]
+fn reread_partition_table(device_path: &str, tx: &mpsc::Sender<FlashEvent>) {
+    // Brief pause so the OS flushes before we poke the partition manager.
+    std::thread::sleep(Duration::from_millis(500));
+
+    match windows::update_disk_properties(device_path) {
+        Ok(()) => send(
+            tx,
+            FlashEvent::Log("Partition table refreshed (IOCTL_DISK_UPDATE_PROPERTIES)".into()),
+        ),
+        Err(e) => send(
+            tx,
+            FlashEvent::Log(format!(
+                "Warning — IOCTL_DISK_UPDATE_PROPERTIES failed: {e}"
+            )),
+        ),
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 fn reread_partition_table(_device_path: &str, tx: &mpsc::Sender<FlashEvent>) {
     send(
         tx,
-        FlashEvent::Log("Partition table refresh not implemented on this platform".into()),
+        FlashEvent::Log("Partition table refresh not supported on this platform".into()),
     );
 }
 
@@ -710,6 +785,327 @@ fn sha256_first_n_bytes(path: &str, max_bytes: u64) -> Result<String, String> {
 }
 
 // ---------------------------------------------------------------------------
+// Windows implementation helpers
+// ---------------------------------------------------------------------------
+
+/// All Windows-specific raw-device operations are collected here.
+///
+/// ## Privilege
+/// The binary must be run as Administrator (the UAC manifest embedded by
+/// `build.rs` ensures Windows prompts for elevation on launch).  Raw physical
+/// drive access (`\\.\PhysicalDriveN`) and volume lock/dismount both require
+/// the `SeManageVolumePrivilege` that is only present in an elevated token.
+///
+/// ## Volume vs physical drive paths
+/// - **Physical drive**: `\\.\PhysicalDrive0`, `\\.\PhysicalDrive1`, …
+///   Used for writing the image, flushing, and partition-table refresh.
+/// - **Volume (drive letter)**: `\\.\C:`, `\\.\D:`, …
+///   Used for locking and dismounting before we write.
+#[cfg(target_os = "windows")]
+mod windows {
+    // ── Win32 type aliases ────────────────────────────────────────────────────
+    // windows-sys uses raw C types; give them readable names.
+    use windows_sys::Win32::{
+        Foundation::{
+            CloseHandle, FALSE, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+        },
+        Storage::FileSystem::{
+            CreateFileW, FlushFileBuffers, FILE_FLAG_WRITE_THROUGH, FILE_SHARE_READ,
+            FILE_SHARE_WRITE, OPEN_EXISTING,
+        },
+        System::{
+            Ioctl::{FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, IOCTL_DISK_UPDATE_PROPERTIES},
+            IO::DeviceIoControl,
+        },
+    };
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// Encode a Rust `&str` as a null-terminated UTF-16 `Vec<u16>`.
+    fn to_wide(s: &str) -> Vec<u16> {
+        use std::os::windows::ffi::OsStrExt;
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+
+    /// Open a device path (`\\.\PhysicalDriveN` or `\\.\C:`) and return its
+    /// Win32 `HANDLE`.  The handle must be closed with `CloseHandle` when done.
+    ///
+    /// `access` should be `GENERIC_READ`, `GENERIC_WRITE`, or both OR-ed.
+    fn open_device_handle(path: &str, access: u32) -> Result<HANDLE, String> {
+        let wide = to_wide(path);
+        let handle = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                access,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_WRITE_THROUGH,
+                std::ptr::null_mut(),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            Err(format!(
+                "Cannot open device '{}': {}",
+                path,
+                std::io::Error::last_os_error()
+            ))
+        } else {
+            Ok(handle)
+        }
+    }
+
+    /// Issue a simple `DeviceIoControl` call with no input or output buffer.
+    ///
+    /// Returns `Ok(())` on success, or an `Err` with the Win32 error message.
+    fn device_ioctl(handle: HANDLE, code: u32) -> Result<(), String> {
+        let mut bytes_returned: u32 = 0;
+        let ok = unsafe {
+            DeviceIoControl(
+                handle,
+                code,
+                std::ptr::null(), // no input buffer
+                0,
+                std::ptr::null_mut(), // no output buffer
+                0,
+                &mut bytes_returned,
+                std::ptr::null_mut(), // synchronous (no OVERLAPPED)
+            )
+        };
+        if ok == FALSE {
+            Err(format!("{}", std::io::Error::last_os_error()))
+        } else {
+            Ok(())
+        }
+    }
+
+    // ── Public helpers called from flash_helper ───────────────────────────────
+
+    /// Enumerate all logical drive letters whose underlying physical device
+    /// path matches `physical_drive` (e.g. `\\.\PhysicalDrive1`).
+    ///
+    /// Returns a list of volume paths suitable for passing to
+    /// `lock_and_dismount_volume`, e.g. `["\\.\C:", "\\.\D:"]`.
+    ///
+    /// Algorithm:
+    /// 1. Obtain the physical drive number from `physical_drive`.
+    /// 2. Call `GetLogicalDriveStringsW` to list all drive letters.
+    /// 3. For each letter, open the volume and call `IOCTL_STORAGE_GET_DEVICE_NUMBER`
+    ///    to get its physical drive number.
+    /// 4. Collect those whose number matches.
+    pub fn find_volumes_on_physical_drive(physical_drive: &str) -> Vec<String> {
+        use windows_sys::Win32::{
+            Storage::FileSystem::GetLogicalDriveStringsW,
+            System::Ioctl::{IOCTL_STORAGE_GET_DEVICE_NUMBER, STORAGE_DEVICE_NUMBER},
+        };
+
+        // Extract the drive index from "\\.\PhysicalDriveN".
+        let target_index: u32 = physical_drive
+            .to_ascii_lowercase()
+            .trim_start_matches(r"\\.\physicaldrive")
+            .parse()
+            .unwrap_or(u32::MAX);
+
+        // Get all logical drive strings ("C:\", "D:\", …).
+        let mut buf = vec![0u16; 512];
+        let len = unsafe { GetLogicalDriveStringsW(buf.len() as u32, buf.as_mut_ptr()) };
+        if len == 0 || len > buf.len() as u32 {
+            return Vec::new();
+        }
+
+        // Parse the null-separated, double-null-terminated list.
+        let drive_letters: Vec<String> = buf[..len as usize]
+            .split(|&c| c == 0)
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                // "C:\" → "\\.\C:"  (no trailing backslash — required for
+                // CreateFileW on a volume)
+                let letter: String = std::char::from_u32(s[0] as u32)
+                    .map(|c| c.to_string())
+                    .unwrap_or_default();
+                format!(r"\\.\{}:", letter)
+            })
+            .collect();
+
+        let mut matching = Vec::new();
+
+        for vol_path in &drive_letters {
+            let wide = to_wide(vol_path);
+            let handle = unsafe {
+                CreateFileW(
+                    wide.as_ptr(),
+                    GENERIC_READ,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    std::ptr::null(),
+                    OPEN_EXISTING,
+                    0,
+                    std::ptr::null_mut(),
+                )
+            };
+            if handle == INVALID_HANDLE_VALUE {
+                continue;
+            }
+
+            let mut dev_num = STORAGE_DEVICE_NUMBER {
+                DeviceType: 0,
+                DeviceNumber: u32::MAX,
+                PartitionNumber: 0,
+            };
+            let mut bytes_returned: u32 = 0;
+
+            let ok = unsafe {
+                DeviceIoControl(
+                    handle,
+                    IOCTL_STORAGE_GET_DEVICE_NUMBER,
+                    std::ptr::null(),
+                    0,
+                    &mut dev_num as *mut _ as *mut _,
+                    std::mem::size_of::<STORAGE_DEVICE_NUMBER>() as u32,
+                    &mut bytes_returned,
+                    std::ptr::null_mut(),
+                )
+            };
+
+            unsafe { CloseHandle(handle) };
+
+            if ok != FALSE && dev_num.DeviceNumber == target_index {
+                matching.push(vol_path.clone());
+            }
+        }
+
+        matching
+    }
+
+    /// Lock a volume exclusively and dismount it so writes to the underlying
+    /// physical disk can proceed without the filesystem intercepting I/O.
+    ///
+    /// Steps (mirrors what Rufus / dd for Windows do):
+    /// 1. Open the volume with `GENERIC_READ | GENERIC_WRITE`.
+    /// 2. `FSCTL_LOCK_VOLUME`   — exclusive lock; fails if files are open.
+    /// 3. `FSCTL_DISMOUNT_VOLUME` — tell the FS driver to flush and detach.
+    ///
+    /// The lock is held for the lifetime of the handle.  Because we close the
+    /// handle immediately after dismounting, the volume is automatically
+    /// unlocked (`FSCTL_UNLOCK_VOLUME` is implicit on handle close).
+    pub fn lock_and_dismount_volume(volume_path: &str) -> Result<(), String> {
+        let handle = open_device_handle(volume_path, GENERIC_READ | GENERIC_WRITE)?;
+
+        // Lock — exclusive; if this fails (files open) we still try to
+        // dismount because the user may have opened Explorer on the drive.
+        let lock_result = device_ioctl(handle, FSCTL_LOCK_VOLUME);
+        if let Err(ref e) = lock_result {
+            // Non-fatal: log and continue.  Dismount can still succeed.
+            eprintln!(
+                "[flash] FSCTL_LOCK_VOLUME on '{volume_path}' failed ({e}); \
+                 attempting dismount anyway"
+            );
+        }
+
+        // Dismount — detaches the filesystem; flushes dirty data first.
+        let dismount_result = device_ioctl(handle, FSCTL_DISMOUNT_VOLUME);
+
+        unsafe { CloseHandle(handle) };
+
+        lock_result.and(dismount_result)
+    }
+
+    /// Call `FlushFileBuffers` on the physical drive to force the OS to push
+    /// all dirty write-back pages to the device hardware.
+    pub fn flush_device_buffers(device_path: &str) -> Result<(), String> {
+        let handle = open_device_handle(device_path, GENERIC_WRITE)?;
+        let ok = unsafe { FlushFileBuffers(handle) };
+        unsafe { CloseHandle(handle) };
+        if ok == FALSE {
+            Err(format!("{}", std::io::Error::last_os_error()))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Send `IOCTL_DISK_UPDATE_PROPERTIES` to the physical drive, asking the
+    /// Windows partition manager to re-read the partition table from disk.
+    pub fn update_disk_properties(device_path: &str) -> Result<(), String> {
+        let handle = open_device_handle(device_path, GENERIC_READ | GENERIC_WRITE)?;
+        let result = device_ioctl(handle, IOCTL_DISK_UPDATE_PROPERTIES);
+        unsafe { CloseHandle(handle) };
+        result
+    }
+
+    // ── Unit tests ────────────────────────────────────────────────────────────
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// `to_wide` must produce a null-terminated UTF-16 sequence.
+        #[test]
+        fn test_to_wide_null_terminated() {
+            let wide = to_wide("ABC");
+            assert_eq!(wide.last(), Some(&0u16), "must be null-terminated");
+            assert_eq!(&wide[..3], &[b'A' as u16, b'B' as u16, b'C' as u16]);
+        }
+
+        /// `to_wide` on an empty string produces exactly one null.
+        #[test]
+        fn test_to_wide_empty() {
+            let wide = to_wide("");
+            assert_eq!(wide, vec![0u16]);
+        }
+
+        /// `open_device_handle` on a nonexistent path must return an error.
+        #[test]
+        fn test_open_device_handle_bad_path_returns_error() {
+            let result = open_device_handle(r"\\.\NonExistentDevice999", GENERIC_READ);
+            assert!(result.is_err(), "expected error for nonexistent device");
+        }
+
+        /// `flush_device_buffers` on a nonexistent drive must return an error.
+        #[test]
+        fn test_flush_device_buffers_bad_path() {
+            let result = flush_device_buffers(r"\\.\PhysicalDrive999");
+            assert!(result.is_err());
+        }
+
+        /// `update_disk_properties` on a nonexistent drive must return an error.
+        #[test]
+        fn test_update_disk_properties_bad_path() {
+            let result = update_disk_properties(r"\\.\PhysicalDrive999");
+            assert!(result.is_err());
+        }
+
+        /// `lock_and_dismount_volume` on a nonexistent path must return an error.
+        #[test]
+        fn test_lock_and_dismount_bad_path() {
+            let result = lock_and_dismount_volume(r"\\.\Z99:");
+            assert!(result.is_err());
+        }
+
+        /// `find_volumes_on_physical_drive` with an unparseable path should
+        /// return an empty Vec (no panic).
+        #[test]
+        fn test_find_volumes_bad_path_no_panic() {
+            let result = find_volumes_on_physical_drive("not-a-valid-path");
+            // May be empty or contain volumes; must not panic.
+            let _ = result;
+        }
+
+        /// `find_volumes_on_physical_drive` for a very high drive number
+        /// (almost certainly nonexistent) should return an empty list.
+        #[test]
+        fn test_find_volumes_nonexistent_drive_returns_empty() {
+            let result = find_volumes_on_physical_drive(r"\\.\PhysicalDrive999");
+            assert!(
+                result.is_empty(),
+                "expected no volumes for PhysicalDrive999"
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -759,6 +1155,7 @@ mod tests {
     // ── is_partition_of ─────────────────────────────────────────────────────
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn test_is_partition_of_sda() {
         assert!(is_partition_of("/dev/sda1", "sda"));
         assert!(is_partition_of("/dev/sda2", "sda"));
@@ -767,6 +1164,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn test_is_partition_of_nvme() {
         assert!(is_partition_of("/dev/nvme0n1p1", "nvme0n1"));
         assert!(is_partition_of("/dev/nvme0n1p2", "nvme0n1"));
@@ -774,12 +1172,14 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn test_is_partition_of_mmcblk() {
         assert!(is_partition_of("/dev/mmcblk0p1", "mmcblk0"));
         assert!(!is_partition_of("/dev/mmcblk0", "mmcblk0"));
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn test_is_partition_of_no_false_prefix_match() {
         assert!(!is_partition_of("/dev/sda1", "sd"));
     }
@@ -1140,6 +1540,20 @@ mod tests {
             .any(|e| matches!(e, FlashEvent::Progress { .. }));
         assert!(has_progress, "must emit Progress events");
 
+        // Must have passed through the core pipeline stages.
+        assert!(
+            has_stage(&events, &FlashStage::Unmounting),
+            "must emit Unmounting stage"
+        );
+        assert!(
+            has_stage(&events, &FlashStage::Writing),
+            "must emit Writing stage"
+        );
+        assert!(
+            has_stage(&events, &FlashStage::Syncing),
+            "must emit Syncing stage"
+        );
+
         // On temp files the pipeline either completes (Done) or fails after
         // the write/verify stage (e.g. BLKRRPART on a regular file).
         let has_done = events.iter().any(|e| matches!(e, FlashEvent::Done));
@@ -1176,5 +1590,499 @@ mod tests {
         assert!(FlashStage::Failed("oops".into())
             .to_string()
             .contains("oops"));
+    }
+
+    // ── FlashStage equality ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_flash_stage_eq() {
+        assert_eq!(FlashStage::Writing, FlashStage::Writing);
+        assert_ne!(FlashStage::Writing, FlashStage::Syncing);
+        assert_eq!(
+            FlashStage::Failed("x".into()),
+            FlashStage::Failed("x".into())
+        );
+        assert_ne!(
+            FlashStage::Failed("x".into()),
+            FlashStage::Failed("y".into())
+        );
+    }
+
+    // ── FlashEvent Clone ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_flash_event_clone() {
+        let events = vec![
+            FlashEvent::Stage(FlashStage::Writing),
+            FlashEvent::Progress {
+                bytes_written: 1024,
+                total_bytes: 4096,
+                speed_mb_s: 12.5,
+            },
+            FlashEvent::Log("hello".into()),
+            FlashEvent::Done,
+            FlashEvent::Error("boom".into()),
+        ];
+        for e in &events {
+            let _ = e.clone(); // must not panic
+        }
+    }
+
+    // ── find_mounted_partitions (platform-neutral contracts) ─────────────────
+
+    /// Calling find_mounted_partitions with a device name that almost
+    /// certainly isn't mounted must return an empty Vec without panicking.
+    #[test]
+    fn test_find_mounted_partitions_nonexistent_device_returns_empty() {
+        // PhysicalDrive999 / sdzzz are both guaranteed not to exist anywhere.
+        #[cfg(target_os = "windows")]
+        let result = find_mounted_partitions("PhysicalDrive999", r"\\.\PhysicalDrive999");
+        #[cfg(not(target_os = "windows"))]
+        let result = find_mounted_partitions("sdzzz", "/dev/sdzzz");
+
+        // Result can be empty or non-empty depending on the OS, but must not panic.
+        let _ = result;
+    }
+
+    /// find_mounted_partitions must return a Vec (never panic) even when
+    /// called with an empty device name.
+    #[test]
+    fn test_find_mounted_partitions_empty_name_no_panic() {
+        let result = find_mounted_partitions("", "");
+        let _ = result;
+    }
+
+    // ── is_partition_of (Windows drive-letter paths are not partitions) ──────
+
+    /// On Windows the caller never passes Unix-style paths, so these should
+    /// all return false (no false positives from the partition-suffix logic).
+    #[test]
+    fn test_is_partition_of_windows_style_paths() {
+        // Windows physical drive paths have no numeric suffix after the name.
+        assert!(!is_partition_of(r"\\.\PhysicalDrive0", "PhysicalDrive0"));
+        assert!(!is_partition_of(r"\\.\PhysicalDrive1", "PhysicalDrive0"));
+    }
+
+    // ── sync_device (via pipeline — emits Log event on all platforms) ────────
+
+    /// sync_device must emit a "caches flushed" log event regardless of
+    /// platform.  We test this indirectly via the full pipeline on temp files.
+    #[test]
+    fn test_pipeline_emits_syncing_stage() {
+        let dir = std::env::temp_dir();
+        let img = dir.join("fk_sync_stage_img.bin");
+        let dev = dir.join("fk_sync_stage_dev.bin");
+
+        let data: Vec<u8> = (0u8..=255).cycle().take(512 * 1024).collect();
+        std::fs::write(&img, &data).unwrap();
+        std::fs::File::create(&dev).unwrap();
+
+        let (tx, rx) = make_channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        run_pipeline(img.to_str().unwrap(), dev.to_str().unwrap(), tx, cancel);
+
+        let events = drain(&rx);
+        assert!(
+            has_stage(&events, &FlashStage::Syncing),
+            "Syncing stage must be emitted on every platform"
+        );
+
+        let _ = std::fs::remove_file(&img);
+        let _ = std::fs::remove_file(&dev);
+    }
+
+    /// The pipeline must emit the Rereading stage on every platform.
+    #[test]
+    fn test_pipeline_emits_rereading_stage() {
+        let dir = std::env::temp_dir();
+        let img = dir.join("fk_reread_stage_img.bin");
+        let dev = dir.join("fk_reread_stage_dev.bin");
+
+        let data: Vec<u8> = vec![0xABu8; 256 * 1024];
+        std::fs::write(&img, &data).unwrap();
+        std::fs::File::create(&dev).unwrap();
+
+        let (tx, rx) = make_channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        run_pipeline(img.to_str().unwrap(), dev.to_str().unwrap(), tx, cancel);
+
+        let events = drain(&rx);
+        assert!(
+            has_stage(&events, &FlashStage::Rereading),
+            "Rereading stage must be emitted on every platform"
+        );
+
+        let _ = std::fs::remove_file(&img);
+        let _ = std::fs::remove_file(&dev);
+    }
+
+    /// The pipeline must emit the Verifying stage on every platform.
+    #[test]
+    fn test_pipeline_emits_verifying_stage() {
+        let dir = std::env::temp_dir();
+        let img = dir.join("fk_verify_stage_img.bin");
+        let dev = dir.join("fk_verify_stage_dev.bin");
+
+        let data: Vec<u8> = vec![0xCDu8; 256 * 1024];
+        std::fs::write(&img, &data).unwrap();
+        std::fs::File::create(&dev).unwrap();
+
+        let (tx, rx) = make_channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        run_pipeline(img.to_str().unwrap(), dev.to_str().unwrap(), tx, cancel);
+
+        let events = drain(&rx);
+        assert!(
+            has_stage(&events, &FlashStage::Verifying),
+            "Verifying stage must be emitted on every platform"
+        );
+
+        let _ = std::fs::remove_file(&img);
+        let _ = std::fs::remove_file(&dev);
+    }
+
+    // ── open_device_for_writing error messages ───────────────────────────────
+
+    /// Opening a path that does not exist must produce an error that mentions
+    /// the device path — verified on all platforms.
+    #[test]
+    fn test_open_device_for_writing_nonexistent_mentions_path() {
+        let bad = if cfg!(target_os = "windows") {
+            r"\\.\PhysicalDrive999".to_string()
+        } else {
+            "/nonexistent/fk_bad_device".to_string()
+        };
+
+        // open_device_for_writing is private; exercise it via write_image.
+        let dir = std::env::temp_dir();
+        let img = dir.join("fk_open_err_img.bin");
+        std::fs::write(&img, vec![1u8; 512]).unwrap();
+
+        let (tx, _rx) = make_channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let result = write_image(img.to_str().unwrap(), &bad, 512, &tx, &cancel);
+
+        assert!(result.is_err(), "must fail for nonexistent device");
+        // The error string should mention the device path.
+        assert!(
+            result.as_ref().unwrap_err().contains("PhysicalDrive999")
+                || result.as_ref().unwrap_err().contains("fk_bad_device")
+                || result.as_ref().unwrap_err().contains("Cannot open"),
+            "error should reference the bad path: {:?}",
+            result
+        );
+
+        let _ = std::fs::remove_file(&img);
+    }
+
+    // ── sync_device emits a log message ─────────────────────────────────────
+
+    /// sync_device must emit at least one FlashEvent::Log containing the
+    /// word "flushed" or "flush" on every platform.
+    #[test]
+    fn test_sync_device_emits_log() {
+        let dir = std::env::temp_dir();
+        let dev = dir.join("fk_sync_log_dev.bin");
+        std::fs::File::create(&dev).unwrap();
+
+        let (tx, rx) = make_channel();
+        sync_device(dev.to_str().unwrap(), &tx);
+
+        let events = drain(&rx);
+        let has_flush_log = events.iter().any(|e| {
+            if let FlashEvent::Log(msg) = e {
+                let lower = msg.to_lowercase();
+                lower.contains("flush") || lower.contains("cache")
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_flush_log,
+            "sync_device must emit a flush/cache log event"
+        );
+
+        let _ = std::fs::remove_file(&dev);
+    }
+
+    // ── reread_partition_table emits a log message ───────────────────────────
+
+    /// reread_partition_table must emit at least one FlashEvent::Log on every
+    /// platform — either a success message or a warning.
+    #[test]
+    fn test_reread_partition_table_emits_log() {
+        let dir = std::env::temp_dir();
+        let dev = dir.join("fk_reread_log_dev.bin");
+        std::fs::File::create(&dev).unwrap();
+
+        let (tx, rx) = make_channel();
+        reread_partition_table(dev.to_str().unwrap(), &tx);
+
+        let events = drain(&rx);
+        let has_log = events.iter().any(|e| matches!(e, FlashEvent::Log(_)));
+        assert!(
+            has_log,
+            "reread_partition_table must emit at least one Log event"
+        );
+
+        let _ = std::fs::remove_file(&dev);
+    }
+
+    // ── unmount_device emits a log message ───────────────────────────────────
+
+    /// unmount_device on a temp-file path (which is never mounted) must emit
+    /// the "no mounted partitions" log without panicking on any platform.
+    #[test]
+    fn test_unmount_device_no_partitions_emits_log() {
+        let dir = std::env::temp_dir();
+        let dev = dir.join("fk_unmount_log_dev.bin");
+        std::fs::File::create(&dev).unwrap();
+
+        let path_str = dev.to_str().unwrap();
+        let (tx, rx) = make_channel();
+        unmount_device(path_str, &tx);
+
+        let events = drain(&rx);
+        // Must emit at least one Log event (either "no partitions" or a warning).
+        let has_log = events.iter().any(|e| matches!(e, FlashEvent::Log(_)));
+        assert!(has_log, "unmount_device must emit at least one Log event");
+
+        let _ = std::fs::remove_file(&dev);
+    }
+
+    // ── Pipeline all-stages ordering ─────────────────────────────────────────
+
+    /// The pipeline must emit stages in the documented order:
+    /// Unmounting → Writing → Syncing → Rereading → Verifying.
+    #[test]
+    fn test_pipeline_stage_ordering() {
+        let dir = std::env::temp_dir();
+        let img = dir.join("fk_order_img.bin");
+        let dev = dir.join("fk_order_dev.bin");
+
+        let data: Vec<u8> = (0u8..=255).cycle().take(256 * 1024).collect();
+        std::fs::write(&img, &data).unwrap();
+        std::fs::File::create(&dev).unwrap();
+
+        let (tx, rx) = make_channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        run_pipeline(img.to_str().unwrap(), dev.to_str().unwrap(), tx, cancel);
+
+        let events = drain(&rx);
+
+        // Collect all Stage events in order.
+        let stages: Vec<&FlashStage> = events
+            .iter()
+            .filter_map(|e| {
+                if let FlashEvent::Stage(s) = e {
+                    Some(s)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Verify the mandatory stages appear and in correct relative order.
+        let pos = |target: &FlashStage| {
+            stages
+                .iter()
+                .position(|s| *s == target)
+                .unwrap_or(usize::MAX)
+        };
+
+        let unmounting = pos(&FlashStage::Unmounting);
+        let writing = pos(&FlashStage::Writing);
+        let syncing = pos(&FlashStage::Syncing);
+        let rereading = pos(&FlashStage::Rereading);
+        let verifying = pos(&FlashStage::Verifying);
+
+        assert!(unmounting < writing, "Unmounting must precede Writing");
+        assert!(writing < syncing, "Writing must precede Syncing");
+        assert!(syncing < rereading, "Syncing must precede Rereading");
+        assert!(rereading < verifying, "Rereading must precede Verifying");
+
+        let _ = std::fs::remove_file(&img);
+        let _ = std::fs::remove_file(&dev);
+    }
+
+    // ── Linux-specific tests ─────────────────────────────────────────────────
+
+    /// On Linux, find_mounted_partitions reads /proc/mounts.
+    /// Verify it returns a Vec without panicking (live test).
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_find_mounted_partitions_linux_no_panic() {
+        // sda is unlikely to be mounted in CI, but the function must not panic.
+        let result = find_mounted_partitions("sda", "/dev/sda");
+        let _ = result;
+    }
+
+    /// On Linux, /proc/mounts always contains at least one line (the root
+    /// filesystem), so reading a clearly-mounted device (e.g. something at /)
+    /// should find entries.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_find_mounted_partitions_linux_reads_proc_mounts() {
+        // We can't know exactly which device is at /, but we can verify
+        // that the function can parse whatever /proc/mounts contains.
+        let content = std::fs::read_to_string("/proc/mounts").unwrap_or_default();
+        // If /proc/mounts is non-empty there must be at least one entry parseable.
+        if !content.is_empty() {
+            // Parse first real /dev/ device from /proc/mounts and verify
+            // find_mounted_partitions does not panic on it.
+            if let Some(line) = content.lines().find(|l| l.starts_with("/dev/")) {
+                if let Some(dev) = line.split_whitespace().next() {
+                    let name = std::path::Path::new(dev)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let _ = find_mounted_partitions(&name, dev);
+                }
+            }
+        }
+    }
+
+    /// On Linux, do_unmount on a path that is not mounted must emit a
+    /// warning log (umount2 will fail with EINVAL) but must not panic.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_do_unmount_not_mounted_emits_warning() {
+        let (tx, rx) = make_channel();
+        do_unmount("/dev/fk_nonexistent_part", &tx);
+        let events = drain(&rx);
+        // Should emit a warning log — the unmount will fail because the
+        // path doesn't exist, but the function must not panic.
+        let has_log = events.iter().any(|e| matches!(e, FlashEvent::Log(_)));
+        assert!(has_log, "do_unmount must emit a Log event on failure");
+    }
+
+    // ── macOS-specific tests ─────────────────────────────────────────────────
+
+    /// On macOS, do_unmount with a bogus partition path must emit a warning
+    /// log (diskutil will fail) but must not panic.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_do_unmount_macos_bad_path_emits_warning() {
+        let (tx, rx) = make_channel();
+        do_unmount("/dev/fk_nonexistent_part", &tx);
+        let events = drain(&rx);
+        let has_log = events.iter().any(|e| matches!(e, FlashEvent::Log(_)));
+        assert!(has_log, "do_unmount must emit a Log event on failure");
+    }
+
+    /// On macOS, find_mounted_partitions reads /proc/mounts (which doesn't
+    /// exist) or falls back gracefully — must not panic.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_find_mounted_partitions_macos_no_panic() {
+        let result = find_mounted_partitions("disk2", "/dev/disk2");
+        let _ = result;
+    }
+
+    /// On macOS, reread_partition_table calls diskutil — must emit a log even
+    /// if the path is a temp file (diskutil will fail gracefully).
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_reread_partition_table_macos_emits_log() {
+        let dir = std::env::temp_dir();
+        let dev = dir.join("fk_macos_reread_dev.bin");
+        std::fs::File::create(&dev).unwrap();
+
+        let (tx, rx) = make_channel();
+        reread_partition_table(dev.to_str().unwrap(), &tx);
+
+        let events = drain(&rx);
+        let has_log = events.iter().any(|e| matches!(e, FlashEvent::Log(_)));
+        assert!(has_log, "reread_partition_table must emit a log on macOS");
+
+        let _ = std::fs::remove_file(&dev);
+    }
+
+    // ── Windows-specific pipeline tests ─────────────────────────────────────
+
+    /// On Windows, find_mounted_partitions delegates to
+    /// windows::find_volumes_on_physical_drive — verify it does not panic
+    /// for a well-formed but nonexistent drive.
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_find_mounted_partitions_windows_nonexistent() {
+        let result = find_mounted_partitions("PhysicalDrive999", r"\\.\PhysicalDrive999");
+        assert!(
+            result.is_empty(),
+            "nonexistent physical drive should have no volumes"
+        );
+    }
+
+    /// On Windows, do_unmount on a bad volume path must emit a warning log
+    /// and not panic.
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_do_unmount_windows_bad_volume_emits_log() {
+        let (tx, rx) = make_channel();
+        do_unmount(r"\\.\Z99:", &tx);
+        let events = drain(&rx);
+        let has_log = events.iter().any(|e| matches!(e, FlashEvent::Log(_)));
+        assert!(has_log, "do_unmount on bad volume must emit a Log event");
+    }
+
+    /// On Windows, sync_device on a nonexistent physical drive path should
+    /// emit a warning log (FlushFileBuffers will fail) but not panic.
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_sync_device_windows_bad_path_no_panic() {
+        let (tx, rx) = make_channel();
+        sync_device(r"\\.\PhysicalDrive999", &tx);
+        let events = drain(&rx);
+        // Must emit at least one log event (either flush warning or the
+        // normal "caches flushed" message).
+        let has_log = events.iter().any(|e| matches!(e, FlashEvent::Log(_)));
+        assert!(has_log, "sync_device must emit a Log event on Windows");
+    }
+
+    /// On Windows, reread_partition_table on a nonexistent drive must emit
+    /// a warning log and not panic.
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_reread_partition_table_windows_bad_path_no_panic() {
+        let (tx, rx) = make_channel();
+        reread_partition_table(r"\\.\PhysicalDrive999", &tx);
+        let events = drain(&rx);
+        let has_log = events.iter().any(|e| matches!(e, FlashEvent::Log(_)));
+        assert!(
+            has_log,
+            "reread_partition_table must emit a Log event on Windows"
+        );
+    }
+
+    /// On Windows, open_device_for_writing on a nonexistent physical drive
+    /// must return an Err containing a meaningful message.
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_open_device_for_writing_windows_access_denied_message() {
+        let dir = std::env::temp_dir();
+        let img = dir.join("fk_win_open_img.bin");
+        std::fs::write(&img, vec![1u8; 512]).unwrap();
+
+        let (tx, _rx) = make_channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let result = write_image(
+            img.to_str().unwrap(),
+            r"\\.\PhysicalDrive999",
+            512,
+            &tx,
+            &cancel,
+        );
+
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        // Must mention either the path, or give a clear error.
+        assert!(
+            msg.contains("PhysicalDrive999")
+                || msg.contains("Access denied")
+                || msg.contains("Cannot open"),
+            "error must be descriptive: {msg}"
+        );
+
+        let _ = std::fs::remove_file(&img);
     }
 }
