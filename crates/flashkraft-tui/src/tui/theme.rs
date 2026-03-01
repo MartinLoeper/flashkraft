@@ -8,9 +8,10 @@
 //!
 //! # Usage
 //!
-//! ```ignore
+//! ```no_run
+//! use flashkraft_tui::tui::theme::all_app_themes;
 //! let themes = all_app_themes();           // Vec<(String, TuiPalette)>
-//! let pal    = &themes[idx].1;
+//! let pal    = &themes[0].1;
 //! // then pass `pal` into every render_* function
 //! ```
 
