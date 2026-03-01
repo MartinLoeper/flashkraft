@@ -2,9 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.4 - 2026-03-01
+### ♻️ Refactor
+- Refactor flash pipeline to run in-process with setuid-root
+### ➕ Added
+- Add Windows UAC manifest for Administrator elevation
+### 🐛 Bug Fixes
+- fix: add --allow-dirty to cargo publish to allow copied README.md
+### 📦 Other Changes
+- Remove unused display_string method and its test
+### 🔄 Updated
+- Update doc examples to use no_run and fix usage code
+### 🔧 Chores
+- chore: nightly dependency update 2026-02-27
+- chore: nightly dependency update 2026-02-28
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.3...v0.6.4
 ## 0.6.3 - 2026-02-26
 ### 🐛 Bug Fixes
 - fix: use --follow-tags to push branch and tag in one operation, preventing double release trigger
+### 🔧 Chores
+- chore: bump version to 0.6.3
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.2...v0.6.3
 ## 0.6.2 - 2026-02-26
 ### 🐛 Bug Fixes
