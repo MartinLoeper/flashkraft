@@ -387,7 +387,10 @@ jobs:
             echo "📦 Copying README.md into crates/flashkraft-core…"
             cp README.md crates/flashkraft-core/README.md
             echo "📦 Publishing flashkraft-core…"
-            cargo publish -p flashkraft-core --token "${CARGO_REGISTRY_TOKEN}" --allow-dirty
+            output=$(cargo publish -p flashkraft-core --allow-dirty 2>&1) && echo "$output" || {
+              echo "$output"
+              echo "$output" | grep -q "already exists" && echo "⏭️  Already published — skipping." || exit 1
+            }
             echo "⏳ Waiting 30 s for the index to propagate…"
             sleep 30
           fi
@@ -405,7 +408,10 @@ jobs:
             echo "📦 Copying README.md into crates/flashkraft-gui…"
             cp README.md crates/flashkraft-gui/README.md
             echo "📦 Publishing flashkraft (GUI)…"
-            cargo publish -p flashkraft --token "${CARGO_REGISTRY_TOKEN}" --allow-dirty
+            output=$(cargo publish -p flashkraft --allow-dirty 2>&1) && echo "$output" || {
+              echo "$output"
+              echo "$output" | grep -q "already exists" && echo "⏭️  Already published — skipping." || exit 1
+            }
             echo "⏳ Waiting 20 s for the index to propagate…"
             sleep 20
           fi
@@ -423,6 +429,9 @@ jobs:
             echo "📦 Copying README.md into crates/flashkraft-tui…"
             cp README.md crates/flashkraft-tui/README.md
             echo "📦 Publishing flashkraft-tui…"
-            cargo publish -p flashkraft-tui --token "${CARGO_REGISTRY_TOKEN}" --allow-dirty
+            output=$(cargo publish -p flashkraft-tui --allow-dirty 2>&1) && echo "$output" || {
+              echo "$output"
+              echo "$output" | grep -q "already exists" && echo "⏭️  Already published — skipping." || exit 1
+            }
           fi
           echo "✅ Publish step complete."
