@@ -3,8 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## 0.6.7 - 2026-03-02
+### 🐛 Bug Fixes
+- fix: replace invalid job-level secrets guard with env var gate in publish job
+- fix: drop deprecated --token flag and make cargo publish idempotent on already-exists
 ### 📦 Other Changes
 - Use --follow-tags for push-release-all to trigger workflows reliably
+### 🔧 Chores
+- chore: bump version to 0.6.7
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.6...v0.6.7
 ## 0.6.6 - 2026-03-02
 ### 🐛 Bug Fixes
