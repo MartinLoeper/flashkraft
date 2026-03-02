@@ -2,9 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.6 - 2026-03-02
+### 🐛 Bug Fixes
+- Fix drive detection to include all USB devices on Linux
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.5...v0.6.6
 ## 0.6.5 - 2026-03-02
 ### ➕ Added
 - Add HashMap and Path imports for Linux drive detection
+### 🔧 Chores
+- chore: bump version to 0.6.5
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.4...v0.6.5
 ## 0.6.4 - 2026-03-01
 ### ♻️ Refactor
