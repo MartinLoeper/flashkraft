@@ -133,7 +133,7 @@ mod linux {
         // Build a map sysfs_path → &DeviceInfo for fast ancestor lookups.
         let usb_by_sysfs: HashMap<PathBuf, &DeviceInfo> = usb_devices
             .iter()
-            .filter_map(|d| Some((d.sysfs_path().to_path_buf(), d)))
+            .map(|d| (d.sysfs_path().to_path_buf(), d))
             .collect();
 
         let block_root = Path::new("/sys/block");
@@ -881,6 +881,10 @@ mod windows {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    use std::collections::HashMap;
+    #[cfg(target_os = "linux")]
+    use std::path::{Path, PathBuf};
 
     // ── Linux helpers ─────────────────────────────────────────────────────────
 

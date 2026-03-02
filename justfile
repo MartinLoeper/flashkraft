@@ -331,7 +331,7 @@ check-publish:
     @./scripts/check_publish.sh
 
 # Dry-run publish for all three crates (in dependency order)
-publish-dry:
+publish-dry: check-all
     @echo "Dry-run: flashkraft-core"
     cargo publish --dry-run -p flashkraft-core
     @echo "Dry-run: flashkraft (GUI)"
@@ -341,7 +341,7 @@ publish-dry:
 
 # Publish all three in dependency order: core → gui → tui.
 # core must hit the crates.io index before gui and tui can resolve it.
-publish: publish-core publish-gui publish-tui
+publish: check-all publish-core publish-gui publish-tui
     @echo "✅ flashkraft-core, flashkraft, and flashkraft-tui published to crates.io!"
 
 # Publish flashkraft-core (required by gui and tui)
@@ -499,7 +499,7 @@ release-all version: (bump version)
 # Use this after `just bump <version>` when you want to push manually.
 # Unlike `just release`, this does NOT dispatch the workflow — the tag push
 # event alone must trigger it.
-push-release-all:
+push-release-all: check-all
     git push origin main
     git push gitea main
     git push origin --tags
