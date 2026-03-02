@@ -497,13 +497,12 @@ release-all version: (bump version)
 
 # Push the latest commit and all tags to every remote (no bump).
 # Use this after `just bump <version>` when you want to push manually.
-# Unlike `just release`, this does NOT dispatch the workflow — the tag push
-# event alone must trigger it.
+# --follow-tags sends the branch ref and its reachable tags in a single push
+# event, which is what GitHub/Gitea need to fire the `on: push: tags: v*`
+# release workflow trigger reliably.
 push-release-all: check-all
-    git push origin main
-    git push gitea main
-    git push origin --tags
-    git push gitea --tags
+    git push --follow-tags origin main
+    git push --follow-tags gitea main
     @echo "✅ Latest commit + tags pushed to all remotes."
 
 
