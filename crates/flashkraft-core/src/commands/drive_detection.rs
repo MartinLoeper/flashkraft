@@ -126,6 +126,8 @@ fn build_display_name(info: &UsbInfo, dev_name: &str) -> String {
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
 
     pub fn enumerate(usb_devices: &[DeviceInfo]) -> Vec<DriveInfo> {
         // Build a map sysfs_path → &DeviceInfo for fast ancestor lookups.
