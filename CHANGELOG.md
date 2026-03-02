@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.5 - 2026-03-02
+### ➕ Added
+- Add HashMap and Path imports for Linux drive detection
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.4...v0.6.5
 ## 0.6.4 - 2026-03-01
 ### ♻️ Refactor
 - Refactor flash pipeline to run in-process with setuid-root
@@ -16,6 +20,7 @@ All notable changes to this project will be documented in this file.
 ### 🔧 Chores
 - chore: nightly dependency update 2026-02-27
 - chore: nightly dependency update 2026-02-28
+- chore: bump version to 0.6.4
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.3...v0.6.4
 ## 0.6.3 - 2026-02-26
 ### 🐛 Bug Fixes
