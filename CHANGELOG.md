@@ -2,9 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.7 - 2026-03-02
+### 📦 Other Changes
+- Use --follow-tags for push-release-all to trigger workflows reliably
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.6...v0.6.7
 ## 0.6.6 - 2026-03-02
 ### 🐛 Bug Fixes
 - Fix drive detection to include all USB devices on Linux
+### 🔧 Chores
+- chore: bump version to 0.6.6
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.5...v0.6.6
 ## 0.6.5 - 2026-03-02
 ### ➕ Added
