@@ -331,15 +331,25 @@ jobs:
     name: Publish to crates.io
     needs: [validate, release]
     runs-on: ubuntu-latest
-    # Skip gracefully if the secret is not configured rather than failing
-    # with an unhelpful auth error.
-    if: ${{ secrets.CRATES_IO_TOKEN != '' }}
+    # `secrets.*` cannot be used in a job-level `if:` on Gitea Actions —
+    # the expression is evaluated before secrets are injected and always
+    # resolves to the empty string, making the condition unparseable.
+    # Instead we expose the secret as an env var and gate every publish
+    # step with `if: env.HAS_TOKEN == 'true'`.
+    env:
+      HAS_TOKEN: ${{ secrets.CRATES_IO_TOKEN != '' }}
     steps:
+      - name: Skip notice (no token)
+        if: env.HAS_TOKEN != 'true'
+        run: echo "⏭️  CRATES_IO_TOKEN is not configured — skipping crates.io publish."
+
       - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
         with:
           ref: ${{ needs.validate.outputs.tag }}
 
       - name: Install Linux GUI system libraries
+        if: env.HAS_TOKEN == 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
@@ -356,14 +366,17 @@ jobs:
             libssl-dev
 
       - name: Install Rust stable
+        if: env.HAS_TOKEN == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Cargo dependencies
+        if: env.HAS_TOKEN == 'true'
         uses: Swatinem/rust-cache@v2
 
       # ── Step 1: publish flashkraft-core ─────────────────────────────────────
       # gui and tui both depend on this; it must hit the crates.io index first.
       - name: Publish flashkraft-core
+        if: env.HAS_TOKEN == 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
@@ -381,6 +394,7 @@ jobs:
 
       # ── Step 2: publish flashkraft (GUI) ────────────────────────────────────
       - name: Publish flashkraft (GUI)
+        if: env.HAS_TOKEN == 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
@@ -398,6 +412,7 @@ jobs:
 
       # ── Step 3: publish flashkraft-tui ──────────────────────────────────────
       - name: Publish flashkraft-tui
+        if: env.HAS_TOKEN == 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
