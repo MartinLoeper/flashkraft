@@ -310,14 +310,15 @@ mod linux {
 }
 
 // ---------------------------------------------------------------------------
-// macOS — pure parsing helpers (always compiled, tested on Linux CI runner)
+// macOS — pure parsing helpers
 //
-// These functions are pure string transforms with no OS calls. They live
-// outside the #[cfg(target_os = "macos")] guard so the Linux test runner
-// can execute them. Only enumerate(), list_external_disks(), disk_info(),
-// and query_system_profiler() are gated on the OS.
+// These functions are pure string transforms with no OS calls. They are
+// compiled on macOS (for production use) and on all platforms under `test`
+// (so the Linux CI runner can execute the unit tests). The `#[cfg]` guard
+// keeps the dead-code lint quiet in non-macOS release builds.
 // ---------------------------------------------------------------------------
 
+#[cfg(any(target_os = "macos", test))]
 /// Parsed entry from `diskutil info -plist`.
 #[derive(Debug, Default)]
 pub(crate) struct MacDiskInfo {
@@ -331,6 +332,7 @@ pub(crate) struct MacDiskInfo {
     pub(crate) usb_serial: Option<String>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 /// A USB device entry parsed from `system_profiler SPUSBDataType -json`.
 #[derive(Debug, Default)]
 pub(crate) struct SpUsbDevice {
@@ -342,6 +344,7 @@ pub(crate) struct SpUsbDevice {
     pub(crate) speed: Option<String>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 mod macos_parse {
     use super::*;
 
@@ -961,7 +964,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     use std::collections::HashMap;
     #[cfg(target_os = "linux")]
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     // ── Linux helpers ─────────────────────────────────────────────────────────
 
