@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.7.0 - 2026-03-03
+### ♻️ Refactor
+- Refactor macOS parsing helpers for testability and clarity
+### 📦 Other Changes
+- Remove nusb dependency and switch to native USB detection
+### 🔧 Chores
+- chore: nightly dependency update 2026-03-02
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.9...v0.7.0
+## 0.6.9 - 2026-03-02
+### 🔧 Chores
+- chore: bump version to 0.6.9
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.7...v0.6.9
 ## 0.6.7 - 2026-03-02
 ### 🐛 Bug Fixes
 - fix: replace invalid job-level secrets guard with env var gate in publish job
