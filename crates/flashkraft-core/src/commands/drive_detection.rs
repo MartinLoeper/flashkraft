@@ -310,150 +310,43 @@ mod linux {
 }
 
 // ---------------------------------------------------------------------------
-// macOS implementation
+// macOS — pure parsing helpers (always compiled, tested on Linux CI runner)
 //
-// Primary source : `diskutil list -plist external`   — BSD disk names
-//                  `diskutil info -plist /dev/diskN` — size, removable, VID/PID/serial
-// Metadata source: `system_profiler SPUSBDataType -json`
-//                  — manufacturer, product string, speed (correlated by VID/PID/serial)
+// These functions are pure string transforms with no OS calls. They live
+// outside the #[cfg(target_os = "macos")] guard so the Linux test runner
+// can execute them. Only enumerate(), list_external_disks(), disk_info(),
+// and query_system_profiler() are gated on the OS.
 // ---------------------------------------------------------------------------
 
-#[cfg(target_os = "macos")]
-mod macos {
+/// Parsed entry from `diskutil info -plist`.
+#[derive(Debug, Default)]
+pub(crate) struct MacDiskInfo {
+    pub(crate) whole_disk: bool,
+    pub(crate) removable: bool,
+    pub(crate) size_bytes: u64,
+    pub(crate) read_only: bool,
+    pub(crate) mount_point: Option<String>,
+    pub(crate) usb_vendor_id: Option<u16>,
+    pub(crate) usb_product_id: Option<u16>,
+    pub(crate) usb_serial: Option<String>,
+}
+
+/// A USB device entry parsed from `system_profiler SPUSBDataType -json`.
+#[derive(Debug, Default)]
+pub(crate) struct SpUsbDevice {
+    pub(crate) vendor_id: Option<u16>,
+    pub(crate) product_id: Option<u16>,
+    pub(crate) serial: Option<String>,
+    pub(crate) manufacturer: Option<String>,
+    pub(crate) product: Option<String>,
+    pub(crate) speed: Option<String>,
+}
+
+mod macos_parse {
     use super::*;
 
-    /// Parsed entry from `diskutil info -plist`.
-    #[derive(Debug, Default)]
-    pub(super) struct DiskInfo {
-        pub(super) whole_disk: bool,
-        pub(super) removable: bool,
-        pub(super) size_bytes: u64,
-        pub(super) read_only: bool,
-        pub(super) mount_point: Option<String>,
-        pub(super) usb_vendor_id: Option<u16>,
-        pub(super) usb_product_id: Option<u16>,
-        pub(super) usb_serial: Option<String>,
-    }
-
-    /// A USB device entry parsed from `system_profiler SPUSBDataType -json`.
-    #[derive(Debug, Default)]
-    pub(super) struct SpUsbDevice {
-        pub(super) vendor_id: Option<u16>,
-        pub(super) product_id: Option<u16>,
-        pub(super) serial: Option<String>,
-        pub(super) manufacturer: Option<String>,
-        pub(super) product: Option<String>,
-        pub(super) speed: Option<String>,
-    }
-
-    pub fn enumerate() -> Vec<DriveInfo> {
-        let whole_disks = list_external_disks();
-        if whole_disks.is_empty() {
-            return Vec::new();
-        }
-
-        // Eagerly query system_profiler once for all USB devices.
-        let sp_devices = query_system_profiler();
-
-        let mut drives = Vec::new();
-
-        for bsd_name in &whole_disks {
-            let Some(info) = disk_info(bsd_name) else {
-                continue;
-            };
-
-            if !info.whole_disk || !info.removable || info.size_bytes == 0 {
-                continue;
-            }
-
-            let size_gb = info.size_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
-
-            // Try to enrich with system_profiler metadata (manufacturer, product, speed).
-            let sp = find_sp_device(
-                &sp_devices,
-                info.usb_vendor_id,
-                info.usb_product_id,
-                info.usb_serial.as_deref(),
-            );
-
-            let usb_info = UsbInfo {
-                vendor_id: info.usb_vendor_id.unwrap_or(0),
-                product_id: info.usb_product_id.unwrap_or(0),
-                manufacturer: sp.and_then(|d| d.manufacturer.clone()),
-                product: sp.and_then(|d| d.product.clone()),
-                serial: info.usb_serial.clone(),
-                speed: sp.and_then(|d| d.speed.clone()),
-            };
-
-            // Use /dev/rdiskN (raw, unbuffered) for much faster writes.
-            let device_path = format!("/dev/r{bsd_name}");
-            let mount_point = info
-                .mount_point
-                .clone()
-                .unwrap_or_else(|| device_path.clone());
-
-            let name = build_display_name(&usb_info, bsd_name);
-
-            let drive = DriveInfo::with_constraints(
-                name,
-                mount_point,
-                size_gb,
-                device_path,
-                false,
-                info.read_only,
-            )
-            .with_usb_info(usb_info);
-
-            drives.push(drive);
-        }
-
-        drives
-    }
-
-    /// Run `diskutil list -plist external` and return BSD names of whole disks.
-    fn list_external_disks() -> Vec<String> {
-        let output = std::process::Command::new("diskutil")
-            .args(["list", "-plist", "external"])
-            .output();
-
-        let Ok(out) = output else {
-            eprintln!("[drive_detection] diskutil list failed");
-            return Vec::new();
-        };
-
-        let text = String::from_utf8_lossy(&out.stdout);
-        parse_plist_string_array(&text, "WholeDisks")
-    }
-
-    /// Run `diskutil info -plist /dev/<bsd_name>` and parse the result.
-    fn disk_info(bsd_name: &str) -> Option<DiskInfo> {
-        let output = std::process::Command::new("diskutil")
-            .args(["info", "-plist", &format!("/dev/{bsd_name}")])
-            .output()
-            .ok()?;
-
-        let text = String::from_utf8_lossy(&output.stdout);
-        parse_disk_info_plist(&text, bsd_name)
-    }
-
-    /// Query `system_profiler SPUSBDataType -json` and parse device entries.
-    ///
-    /// Returns an empty Vec on any error — metadata is best-effort.
-    pub(super) fn query_system_profiler() -> Vec<SpUsbDevice> {
-        let output = std::process::Command::new("system_profiler")
-            .args(["SPUSBDataType", "-json"])
-            .output();
-
-        let Ok(out) = output else {
-            return Vec::new();
-        };
-
-        let json = String::from_utf8_lossy(&out.stdout);
-        parse_system_profiler_json(&json)
-    }
-
     /// Find the best-matching system_profiler device by VID + PID + serial.
-    pub(super) fn find_sp_device<'a>(
+    pub fn find_sp_device<'a>(
         devices: &'a [SpUsbDevice],
         vid: Option<u16>,
         pid: Option<u16>,
@@ -463,39 +356,28 @@ mod macos {
 
         // 1. VID + PID + serial (most specific).
         if let Some(s) = serial {
-            for dev in devices {
-                if dev.vendor_id == Some(v)
+            if let Some(dev) = devices.iter().find(|dev| {
+                dev.vendor_id == Some(v)
                     && dev.product_id == Some(p)
                     && dev.serial.as_deref() == Some(s)
-                {
-                    return Some(dev);
-                }
-            }
-        }
-
-        // 2. VID + PID only.
-        for dev in devices {
-            if dev.vendor_id == Some(v) && dev.product_id == Some(p) {
+            }) {
                 return Some(dev);
             }
         }
 
-        None
+        // 2. VID + PID only.
+        devices
+            .iter()
+            .find(|dev| dev.vendor_id == Some(v) && dev.product_id == Some(p))
     }
 
-    /// Parse `system_profiler SPUSBDataType -json` output.
-    ///
-    /// The JSON structure is:
-    /// ```json
-    /// { "SPUSBDataType": [ { "_items": [ { ... }, ... ] }, ... ] }
-    /// ```
     /// Parse `system_profiler SPUSBDataType -json` output.
     ///
     /// Scans every `_items` array in the document recursively, extracting each
     /// array element that looks like a USB device (has `vendor_id` or
     /// `product_id`). Hub/controller wrapper objects that only contain
     /// `_items` sub-arrays are not emitted as devices themselves.
-    pub(super) fn parse_system_profiler_json(json: &str) -> Vec<SpUsbDevice> {
+    pub fn parse_system_profiler_json(json: &str) -> Vec<SpUsbDevice> {
         let mut devices = Vec::new();
         collect_items_arrays(json, &mut devices);
         devices
@@ -508,16 +390,13 @@ mod macos {
         while let Some(pos) = remaining.find("\"_items\"") {
             remaining = &remaining[pos + "\"_items\"".len()..];
 
-            // Skip whitespace and the colon.
             let after_colon = match remaining.find('[') {
                 Some(p) => &remaining[p + 1..],
                 None => continue,
             };
 
-            // Find the matching `]` for this array.
             let array_content = extract_json_array(after_colon);
 
-            // Parse each `{ … }` object in the array.
             let mut arr = array_content;
             while let Some(brace) = arr.find('{') {
                 arr = &arr[brace + 1..];
@@ -530,21 +409,16 @@ mod macos {
                     }
                 }
 
-                // A device block may itself have _items (hub with child devices).
                 if block.contains("\"_items\"") {
                     collect_items_arrays(block, out);
                 }
 
-                // Advance past this object so we don't re-parse it.
                 arr = &arr[block.len()..];
             }
-
-            // Also recurse into the rest of the document for further _items arrays.
         }
     }
 
     /// Extract the text of a JSON array starting just after its opening `[`.
-    /// Returns the content up to (but not including) the matching `]`.
     fn extract_json_array(s: &str) -> &str {
         let mut depth = 1usize;
         let mut idx = 0;
@@ -565,7 +439,6 @@ mod macos {
     }
 
     /// Extract the text of a JSON object starting just after its opening `{`.
-    /// Returns the content up to (but not including) the matching `}`.
     fn extract_json_object(s: &str) -> &str {
         let mut depth = 1usize;
         let mut idx = 0;
@@ -586,32 +459,25 @@ mod macos {
     }
 
     /// Parse a single USB device JSON object block (content between `{` and `}`).
-    pub(super) fn parse_sp_device_block(block: &str) -> SpUsbDevice {
-        let mut dev = SpUsbDevice::default();
-
-        dev.vendor_id = json_str_value(block, "vendor_id").and_then(|s| parse_sp_hex_id(&s));
-        dev.product_id = json_str_value(block, "product_id").and_then(|s| parse_sp_hex_id(&s));
-        dev.serial = json_str_value(block, "serial_num");
-        dev.manufacturer = json_str_value(block, "manufacturer");
-        // system_profiler uses "_name" for the product/device name.
-        dev.product = json_str_value(block, "_name");
-        dev.speed = json_str_value(block, "device_speed").map(|s| sp_speed_string(&s));
-
-        dev
+    pub fn parse_sp_device_block(block: &str) -> SpUsbDevice {
+        SpUsbDevice {
+            vendor_id: json_str_value(block, "vendor_id").and_then(|s| parse_sp_hex_id(&s)),
+            product_id: json_str_value(block, "product_id").and_then(|s| parse_sp_hex_id(&s)),
+            serial: json_str_value(block, "serial_num"),
+            manufacturer: json_str_value(block, "manufacturer"),
+            product: json_str_value(block, "_name"),
+            speed: json_str_value(block, "device_speed").map(|s| sp_speed_string(&s)),
+        }
     }
 
     /// Extract the string value for a JSON key from a raw JSON object block.
-    ///
-    /// Handles: `"key": "value"` — sufficient for system_profiler output.
-    pub(super) fn json_str_value(block: &str, key: &str) -> Option<String> {
+    pub fn json_str_value(block: &str, key: &str) -> Option<String> {
         let needle = format!("\"{key}\"");
         let pos = block.find(&needle)?;
         let after_key = &block[pos + needle.len()..];
-        // Skip whitespace and colon.
         let colon = after_key.find(':')?;
         let after_colon = after_key[colon + 1..].trim_start();
-        if after_colon.starts_with('"') {
-            let inner = &after_colon[1..];
+        if let Some(inner) = after_colon.strip_prefix('"') {
             let end = inner.find('"')?;
             Some(inner[..end].to_string())
         } else {
@@ -620,15 +486,12 @@ mod macos {
     }
 
     /// Parse a system_profiler hex ID string like `"0x0781"` or `"0781"` to u16.
-    pub(super) fn parse_sp_hex_id(s: &str) -> Option<u16> {
-        let s = s.trim().trim_start_matches("0x");
-        u16::from_str_radix(s, 16).ok()
+    pub fn parse_sp_hex_id(s: &str) -> Option<u16> {
+        u16::from_str_radix(s.trim().trim_start_matches("0x"), 16).ok()
     }
 
     /// Convert a system_profiler speed string to a human-readable label.
-    ///
-    /// system_profiler uses strings like `"high_speed"`, `"super_speed"`, etc.
-    pub(super) fn sp_speed_string(raw: &str) -> String {
+    pub fn sp_speed_string(raw: &str) -> String {
         match raw.trim() {
             "low_speed" => "Low Speed (1.5 Mbps)".to_string(),
             "full_speed" => "Full Speed (12 Mbps)".to_string(),
@@ -639,18 +502,12 @@ mod macos {
         }
     }
 
-    // ── Minimal plist parser ─────────────────────────────────────────────────
-    //
-    // diskutil emits Apple XML plist format. We do targeted key extraction
-    // with simple text scanning rather than pulling in a full plist crate.
-
-    /// Extract a string array value for `key` from an XML plist.
-    pub(super) fn parse_plist_string_array(plist: &str, key: &str) -> Vec<String> {
+    /// Extract a string array value for `key` from an Apple XML plist.
+    pub fn parse_plist_string_array(plist: &str, key: &str) -> Vec<String> {
         let key_tag = format!("<key>{key}</key>");
         let Some(key_pos) = plist.find(&key_tag) else {
             return Vec::new();
         };
-
         let after_key = &plist[key_pos + key_tag.len()..];
         let Some(array_start) = after_key.find("<array>") else {
             return Vec::new();
@@ -676,8 +533,8 @@ mod macos {
     }
 
     /// Parse `diskutil info -plist` output for a single disk.
-    pub(super) fn parse_disk_info_plist(plist: &str, _bsd_name: &str) -> Option<DiskInfo> {
-        let mut info = DiskInfo::default();
+    pub fn parse_disk_info_plist(plist: &str, _bsd_name: &str) -> Option<MacDiskInfo> {
+        let mut info = MacDiskInfo::default();
         let mut cursor = plist;
 
         while let Some(key_start) = cursor.find("<key>") {
@@ -741,20 +598,17 @@ mod macos {
         if info.size_bytes == 0 {
             return None;
         }
-
         Some(info)
     }
 
     fn advance_past_value(cursor: &str) -> &str {
         let s = cursor.trim_start();
-
         if s.starts_with("<true/>") {
             return &cursor[cursor.find("<true/>").unwrap() + "<true/>".len()..];
         }
         if s.starts_with("<false/>") {
             return &cursor[cursor.find("<false/>").unwrap() + "<false/>".len()..];
         }
-
         let tag_end = match s.find('>') {
             Some(p) => p,
             None => return "",
@@ -767,7 +621,6 @@ mod macos {
             return "";
         }
         let tag_name = &s[tag_name_start..tag_end];
-
         let close_tag = format!("</{tag_name}>");
         if let Some(pos) = cursor.find(&close_tag) {
             &cursor[pos + close_tag.len()..]
@@ -776,7 +629,7 @@ mod macos {
         }
     }
 
-    pub(super) fn extract_integer(s: &str) -> Option<u64> {
+    pub fn extract_integer(s: &str) -> Option<u64> {
         for tag in &["<integer>", "<real>"] {
             if let Some(start) = s.find(tag) {
                 let after = &s[start + tag.len()..];
@@ -793,7 +646,7 @@ mod macos {
         None
     }
 
-    pub(super) fn extract_string(s: &str) -> Option<String> {
+    pub fn extract_string(s: &str) -> Option<String> {
         let start = s.find("<string>")? + "<string>".len();
         let end = s[start..].find("</string>")?;
         Some(s[start..start + end].trim().to_string())
@@ -801,34 +654,224 @@ mod macos {
 }
 
 // ---------------------------------------------------------------------------
-// Windows implementation
-//
-// Primary source : `wmic diskdrive where InterfaceType="USB"` — device ID,
-//                  size, model, serial number, PNPDeviceID
-// Metadata source: PNPDeviceID field contains `VID_xxxx&PID_xxxx` — parsed
-//                  in-process, no extra tool needed.
+// macOS implementation — OS-dependent portion (shells out to diskutil /
+// system_profiler). Gated on target_os so it only compiles on macOS.
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "macos")]
+mod macos {
+    use super::macos_parse::*;
+    use super::*;
+
+    pub fn enumerate() -> Vec<DriveInfo> {
+        let whole_disks = list_external_disks();
+        if whole_disks.is_empty() {
+            return Vec::new();
+        }
+
+        let sp_devices = query_system_profiler();
+
+        let mut drives = Vec::new();
+
+        for bsd_name in &whole_disks {
+            let Some(info) = disk_info(bsd_name) else {
+                continue;
+            };
+
+            if !info.whole_disk || !info.removable || info.size_bytes == 0 {
+                continue;
+            }
+
+            let size_gb = info.size_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+
+            let sp = find_sp_device(
+                &sp_devices,
+                info.usb_vendor_id,
+                info.usb_product_id,
+                info.usb_serial.as_deref(),
+            );
+
+            let usb_info = UsbInfo {
+                vendor_id: info.usb_vendor_id.unwrap_or(0),
+                product_id: info.usb_product_id.unwrap_or(0),
+                manufacturer: sp.and_then(|d| d.manufacturer.clone()),
+                product: sp.and_then(|d| d.product.clone()),
+                serial: info.usb_serial.clone(),
+                speed: sp.and_then(|d| d.speed.clone()),
+            };
+
+            let device_path = format!("/dev/r{bsd_name}");
+            let mount_point = info
+                .mount_point
+                .clone()
+                .unwrap_or_else(|| device_path.clone());
+
+            let name = build_display_name(&usb_info, bsd_name);
+
+            let drive = DriveInfo::with_constraints(
+                name,
+                mount_point,
+                size_gb,
+                device_path,
+                false,
+                info.read_only,
+            )
+            .with_usb_info(usb_info);
+
+            drives.push(drive);
+        }
+
+        drives
+    }
+
+    fn list_external_disks() -> Vec<String> {
+        let output = std::process::Command::new("diskutil")
+            .args(["list", "-plist", "external"])
+            .output();
+        let Ok(out) = output else {
+            eprintln!("[drive_detection] diskutil list failed");
+            return Vec::new();
+        };
+        let text = String::from_utf8_lossy(&out.stdout);
+        parse_plist_string_array(&text, "WholeDisks")
+    }
+
+    fn disk_info(bsd_name: &str) -> Option<MacDiskInfo> {
+        let output = std::process::Command::new("diskutil")
+            .args(["info", "-plist", &format!("/dev/{bsd_name}")])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        parse_disk_info_plist(&text, bsd_name)
+    }
+
+    fn query_system_profiler() -> Vec<SpUsbDevice> {
+        let output = std::process::Command::new("system_profiler")
+            .args(["SPUSBDataType", "-json"])
+            .output();
+        let Ok(out) = output else {
+            return Vec::new();
+        };
+        let json = String::from_utf8_lossy(&out.stdout);
+        parse_system_profiler_json(&json)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Windows — pure parsing helpers (always compiled, tested on Linux CI runner)
+// ---------------------------------------------------------------------------
+
+/// A parsed USB disk drive from wmic output.
+#[derive(Debug)]
+#[allow(dead_code)]
+pub(crate) struct WmicDisk {
+    pub(crate) device_id: String,
+    pub(crate) size_bytes: u64,
+    pub(crate) model: String,
+    pub(crate) serial: String,
+    pub(crate) vendor_id: Option<u16>,
+    pub(crate) product_id: Option<u16>,
+}
+
+mod windows_parse {
+    use super::*;
+
+    /// Parse wmic `/format:csv` output into `WmicDisk` entries.
+    ///
+    /// Expected header + data format:
+    /// ```text
+    /// Node,DeviceID,Model,PNPDeviceID,SerialNumber,Size
+    /// HOSTNAME,\\.\PhysicalDrive1,SanDisk Ultra,USB\VID_0781&PID_5581\AA0123,AA0123,32012804608
+    /// ```
+    #[allow(dead_code)]
+    pub fn parse_wmic_csv(csv: &str) -> Vec<WmicDisk> {
+        let mut lines = csv.lines().map(|l| l.trim()).filter(|l| !l.is_empty());
+
+        let header = loop {
+            match lines.next() {
+                Some(h) if h.to_lowercase().contains("deviceid") => break h,
+                Some(_) => continue,
+                None => return Vec::new(),
+            }
+        };
+
+        let cols: Vec<&str> = header.split(',').collect();
+        let idx = |name: &str| -> Option<usize> {
+            cols.iter()
+                .position(|c| c.trim().to_lowercase() == name.to_lowercase())
+        };
+
+        let idx_device = idx("DeviceID");
+        let idx_size = idx("Size");
+        let idx_model = idx("Model");
+        let idx_serial = idx("SerialNumber");
+        let idx_pnp = idx("PNPDeviceID");
+
+        let mut disks = Vec::new();
+
+        for line in lines {
+            let fields: Vec<&str> = line.split(',').collect();
+            let get = |i: Option<usize>| -> &str {
+                i.and_then(|i| fields.get(i).copied()).unwrap_or("").trim()
+            };
+
+            let device_id = get(idx_device);
+            if device_id.is_empty() || !device_id.contains("PhysicalDrive") {
+                continue;
+            }
+
+            let size_bytes = get(idx_size).parse::<u64>().unwrap_or(0);
+            let (vendor_id, product_id) = parse_vid_pid_from_pnp(get(idx_pnp));
+
+            disks.push(WmicDisk {
+                device_id: device_id.to_string(),
+                size_bytes,
+                model: get(idx_model).to_string(),
+                serial: get(idx_serial).to_string(),
+                vendor_id,
+                product_id,
+            });
+        }
+
+        disks
+    }
+
+    /// Extract VID and PID from a Windows PNPDeviceID string.
+    ///
+    /// Format: `USB\VID_0781&PID_5581\AA01234567890`
+    #[allow(dead_code)]
+    pub fn parse_vid_pid_from_pnp(pnp: &str) -> (Option<u16>, Option<u16>) {
+        let upper = pnp.to_uppercase();
+
+        let vid = upper.find("VID_").and_then(|pos| {
+            let hex = &upper[pos + 4..];
+            let end = hex
+                .find(|c: char| !c.is_ascii_hexdigit())
+                .unwrap_or(hex.len());
+            u16::from_str_radix(&hex[..end], 16).ok()
+        });
+
+        let pid = upper.find("PID_").and_then(|pos| {
+            let hex = &upper[pos + 4..];
+            let end = hex
+                .find(|c: char| !c.is_ascii_hexdigit())
+                .unwrap_or(hex.len());
+            u16::from_str_radix(&hex[..end], 16).ok()
+        });
+
+        (vid, pid)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Windows implementation — OS-dependent portion (shells out to wmic).
+// Gated on target_os so it only compiles on Windows.
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "windows")]
 mod windows {
+    use super::windows_parse::*;
     use super::*;
-
-    /// A parsed USB disk drive from wmic output.
-    #[derive(Debug)]
-    struct WmicDisk {
-        /// `\\.\PhysicalDriveN`
-        device_id: String,
-        /// Size in bytes (0 if unknown)
-        size_bytes: u64,
-        /// Model string (may be empty)
-        model: String,
-        /// Serial number (may be empty)
-        serial: String,
-        /// USB Vendor ID parsed from PNPDeviceID (e.g. `USB\VID_0781&PID_5581\...`)
-        vendor_id: Option<u16>,
-        /// USB Product ID parsed from PNPDeviceID
-        product_id: Option<u16>,
-    }
 
     pub fn enumerate() -> Vec<DriveInfo> {
         let wmic_disks = query_wmic_usb_disks();
@@ -859,7 +902,6 @@ mod windows {
                 } else {
                     Some(disk.serial.clone())
                 },
-                // wmic does not expose USB speed; leave it absent.
                 speed: None,
             };
 
@@ -868,7 +910,6 @@ mod windows {
                 .split('\\')
                 .next_back()
                 .unwrap_or(&disk.device_id);
-
             let name = build_display_name(&usb_info, short_name);
 
             let drive = DriveInfo::with_constraints(
@@ -877,7 +918,7 @@ mod windows {
                 size_gb,
                 disk.device_id.clone(),
                 false,
-                false, // wmic doesn't easily expose read-only flag
+                false,
             )
             .with_usb_info(usb_info);
 
@@ -887,7 +928,6 @@ mod windows {
         drives
     }
 
-    /// Run wmic and collect USB disk entries including PNPDeviceID for VID/PID.
     fn query_wmic_usb_disks() -> Vec<WmicDisk> {
         let output = std::process::Command::new("wmic")
             .args([
@@ -899,102 +939,12 @@ mod windows {
                 "/format:csv",
             ])
             .output();
-
         let Ok(out) = output else {
             eprintln!("[drive_detection] wmic query failed");
             return Vec::new();
         };
-
         let text = String::from_utf8_lossy(&out.stdout);
         parse_wmic_csv(&text)
-    }
-
-    /// Parse wmic CSV output.
-    ///
-    /// wmic `/format:csv` emits lines like:
-    /// ```
-    /// Node,DeviceID,Model,PNPDeviceID,SerialNumber,Size
-    /// HOSTNAME,\\.\PhysicalDrive1,SanDisk Ultra,USB\VID_0781&PID_5581\AA0123,AA0123,32012804608
-    /// ```
-    pub(super) fn parse_wmic_csv(csv: &str) -> Vec<WmicDisk> {
-        let mut lines = csv.lines().map(|l| l.trim()).filter(|l| !l.is_empty());
-
-        // Find header line.
-        let header = loop {
-            match lines.next() {
-                Some(h) if h.to_lowercase().contains("deviceid") => break h,
-                Some(_) => continue,
-                None => return Vec::new(),
-            }
-        };
-
-        let cols: Vec<&str> = header.split(',').collect();
-        let idx = |name: &str| -> Option<usize> {
-            cols.iter()
-                .position(|c| c.trim().to_lowercase() == name.to_lowercase())
-        };
-
-        let idx_device = idx("DeviceID");
-        let idx_size = idx("Size");
-        let idx_model = idx("Model");
-        let idx_serial = idx("SerialNumber");
-        let idx_pnp = idx("PNPDeviceID");
-
-        let mut disks = Vec::new();
-
-        for line in lines {
-            let fields: Vec<&str> = line.split(',').collect();
-
-            let get = |i: Option<usize>| -> &str {
-                i.and_then(|i| fields.get(i).copied()).unwrap_or("").trim()
-            };
-
-            let device_id = get(idx_device);
-            if device_id.is_empty() || !device_id.contains("PhysicalDrive") {
-                continue;
-            }
-
-            let size_bytes = get(idx_size).parse::<u64>().unwrap_or(0);
-            let pnp = get(idx_pnp);
-
-            let (vendor_id, product_id) = parse_vid_pid_from_pnp(pnp);
-
-            disks.push(WmicDisk {
-                device_id: device_id.to_string(),
-                size_bytes,
-                model: get(idx_model).to_string(),
-                serial: get(idx_serial).to_string(),
-                vendor_id,
-                product_id,
-            });
-        }
-
-        disks
-    }
-
-    /// Extract VID and PID from a Windows PNPDeviceID string.
-    ///
-    /// Format: `USB\VID_0781&PID_5581\AA01234567890`
-    pub(super) fn parse_vid_pid_from_pnp(pnp: &str) -> (Option<u16>, Option<u16>) {
-        let upper = pnp.to_uppercase();
-
-        let vid = upper.find("VID_").and_then(|pos| {
-            let hex = &upper[pos + 4..];
-            let end = hex
-                .find(|c: char| !c.is_ascii_hexdigit())
-                .unwrap_or(hex.len());
-            u16::from_str_radix(&hex[..end], 16).ok()
-        });
-
-        let pid = upper.find("PID_").and_then(|pos| {
-            let hex = &upper[pos + 4..];
-            let end = hex
-                .find(|c: char| !c.is_ascii_hexdigit())
-                .unwrap_or(hex.len());
-            u16::from_str_radix(&hex[..end], 16).ok()
-        });
-
-        (vid, pid)
     }
 }
 
@@ -1004,6 +954,8 @@ mod windows {
 
 #[cfg(test)]
 mod tests {
+    use super::macos_parse::*;
+    use super::windows_parse::*;
     use super::*;
 
     #[cfg(target_os = "linux")]
@@ -1323,7 +1275,6 @@ mod tests {
 
     // ── macOS system_profiler parser ─────────────────────────────────────────
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_parse_system_profiler_single_device() {
         let json = r#"{
@@ -1342,7 +1293,7 @@ mod tests {
     }
   ]
 }"#;
-        let devices = macos::parse_system_profiler_json(json);
+        let devices = parse_system_profiler_json(json);
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].vendor_id, Some(0x0781));
         assert_eq!(devices[0].product_id, Some(0x5581));
@@ -1352,7 +1303,6 @@ mod tests {
         assert_eq!(devices[0].speed.as_deref(), Some("High Speed (480 Mbps)"));
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_parse_system_profiler_multiple_devices() {
         let json = r#"{
@@ -1375,70 +1325,57 @@ mod tests {
     }
   ]
 }"#;
-        let devices = macos::parse_system_profiler_json(json);
+        let devices = parse_system_profiler_json(json);
         assert_eq!(devices.len(), 2);
         assert_eq!(devices[0].vendor_id, Some(0x0781));
         assert_eq!(devices[1].vendor_id, Some(0x0951));
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_parse_system_profiler_empty_items() {
         let json = r#"{"SPUSBDataType": [{"_items": []}]}"#;
-        let devices = macos::parse_system_profiler_json(json);
+        let devices = parse_system_profiler_json(json);
         assert!(devices.is_empty());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_parse_system_profiler_no_usb_data() {
         let json = r#"{"SPUSBDataType": []}"#;
-        let devices = macos::parse_system_profiler_json(json);
+        let devices = parse_system_profiler_json(json);
         assert!(devices.is_empty());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_parse_sp_hex_id_with_prefix() {
-        assert_eq!(macos::parse_sp_hex_id("0x0781"), Some(0x0781));
+        assert_eq!(parse_sp_hex_id("0x0781"), Some(0x0781));
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_parse_sp_hex_id_bare() {
-        assert_eq!(macos::parse_sp_hex_id("0781"), Some(0x0781));
+        assert_eq!(parse_sp_hex_id("0781"), Some(0x0781));
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_parse_sp_hex_id_invalid() {
-        assert!(macos::parse_sp_hex_id("zzzz").is_none());
-        assert!(macos::parse_sp_hex_id("").is_none());
+        assert!(parse_sp_hex_id("zzzz").is_none());
+        assert!(parse_sp_hex_id("").is_none());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_sp_speed_string_all_variants() {
-        assert_eq!(macos::sp_speed_string("low_speed"), "Low Speed (1.5 Mbps)");
-        assert_eq!(macos::sp_speed_string("full_speed"), "Full Speed (12 Mbps)");
-        assert_eq!(
-            macos::sp_speed_string("high_speed"),
-            "High Speed (480 Mbps)"
-        );
-        assert_eq!(macos::sp_speed_string("super_speed"), "SuperSpeed (5 Gbps)");
-        assert_eq!(
-            macos::sp_speed_string("super_speed_plus"),
-            "SuperSpeed+ (10 Gbps)"
-        );
+        assert_eq!(sp_speed_string("low_speed"), "Low Speed (1.5 Mbps)");
+        assert_eq!(sp_speed_string("full_speed"), "Full Speed (12 Mbps)");
+        assert_eq!(sp_speed_string("high_speed"), "High Speed (480 Mbps)");
+        assert_eq!(sp_speed_string("super_speed"), "SuperSpeed (5 Gbps)");
+        assert_eq!(sp_speed_string("super_speed_plus"), "SuperSpeed+ (10 Gbps)");
         // Unknown variant passes through unchanged.
-        assert_eq!(macos::sp_speed_string("warp_speed"), "warp_speed");
+        assert_eq!(sp_speed_string("warp_speed"), "warp_speed");
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_find_sp_device_by_vid_pid_serial() {
         let devices = vec![
-            macos::SpUsbDevice {
+            SpUsbDevice {
                 vendor_id: Some(0x0781),
                 product_id: Some(0x5581),
                 serial: Some("SN001".to_string()),
@@ -1446,7 +1383,7 @@ mod tests {
                 product: Some("Ultra".to_string()),
                 speed: None,
             },
-            macos::SpUsbDevice {
+            SpUsbDevice {
                 vendor_id: Some(0x0951),
                 product_id: Some(0x1666),
                 serial: Some("SN002".to_string()),
@@ -1456,15 +1393,14 @@ mod tests {
             },
         ];
 
-        let found = macos::find_sp_device(&devices, Some(0x0781), Some(0x5581), Some("SN001"));
+        let found = find_sp_device(&devices, Some(0x0781), Some(0x5581), Some("SN001"));
         assert!(found.is_some());
         assert_eq!(found.unwrap().manufacturer.as_deref(), Some("SanDisk"));
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_find_sp_device_by_vid_pid_only() {
-        let devices = vec![macos::SpUsbDevice {
+        let devices = vec![SpUsbDevice {
             vendor_id: Some(0x0781),
             product_id: Some(0x5581),
             serial: None,
@@ -1474,14 +1410,13 @@ mod tests {
         }];
 
         // No serial provided — should still match on VID+PID.
-        let found = macos::find_sp_device(&devices, Some(0x0781), Some(0x5581), None);
+        let found = find_sp_device(&devices, Some(0x0781), Some(0x5581), None);
         assert!(found.is_some());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_find_sp_device_wrong_serial_falls_back_to_vid_pid() {
-        let devices = vec![macos::SpUsbDevice {
+        let devices = vec![SpUsbDevice {
             vendor_id: Some(0x0781),
             product_id: Some(0x5581),
             serial: Some("CORRECT".to_string()),
@@ -1491,14 +1426,13 @@ mod tests {
         }];
 
         // Wrong serial but same VID+PID → falls through to VID+PID match.
-        let found = macos::find_sp_device(&devices, Some(0x0781), Some(0x5581), Some("WRONG"));
+        let found = find_sp_device(&devices, Some(0x0781), Some(0x5581), Some("WRONG"));
         assert!(found.is_some());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_find_sp_device_no_match() {
-        let devices = vec![macos::SpUsbDevice {
+        let devices = vec![SpUsbDevice {
             vendor_id: Some(0x0781),
             product_id: Some(0x5581),
             serial: None,
@@ -1507,14 +1441,14 @@ mod tests {
             speed: None,
         }];
 
-        let found = macos::find_sp_device(&devices, Some(0x1234), Some(0xabcd), None);
+        // Different VID/PID — must not match.
+        let found = find_sp_device(&devices, Some(0x1234), Some(0xabcd), None);
         assert!(found.is_none());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_find_sp_device_none_vid_returns_none() {
-        let devices = vec![macos::SpUsbDevice {
+        let devices = vec![SpUsbDevice {
             vendor_id: Some(0x0781),
             product_id: Some(0x5581),
             serial: None,
@@ -1524,38 +1458,34 @@ mod tests {
         }];
 
         // vid=None means we cannot correlate — must return None.
-        let found = macos::find_sp_device(&devices, None, Some(0x5581), None);
+        let found = find_sp_device(&devices, None, Some(0x5581), None);
         assert!(found.is_none());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_json_str_value_present() {
         let block = r#""manufacturer": "SanDisk", "product_id": "0x5581""#;
         assert_eq!(
-            macos::json_str_value(block, "manufacturer"),
+            json_str_value(block, "manufacturer"),
             Some("SanDisk".to_string())
         );
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_json_str_value_missing_key() {
         let block = r#""other": "value""#;
-        assert!(macos::json_str_value(block, "manufacturer").is_none());
+        assert!(json_str_value(block, "manufacturer").is_none());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_json_str_value_non_string_value() {
         // Numeric value — not a quoted string, should return None.
         let block = r#""count": 42"#;
-        assert!(macos::json_str_value(block, "count").is_none());
+        assert!(json_str_value(block, "count").is_none());
     }
 
-    // ── macOS plist parser ────────────────────────────────────────────────────
+    // ── macOS plist parser (already inlined above) ────────────────────────────
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_parse_plist_string_array_whole_disks() {
         let plist = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -1571,18 +1501,16 @@ mod tests {
     </array>
 </dict>
 </plist>"#;
-        let result = macos::parse_plist_string_array(plist, "WholeDisks");
+        let result = parse_plist_string_array(plist, "WholeDisks");
         assert_eq!(result, vec!["disk2", "disk3"]);
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_parse_plist_string_array_missing_key() {
         let plist = "<plist><dict><key>Other</key><array/></dict></plist>";
-        assert!(macos::parse_plist_string_array(plist, "WholeDisks").is_empty());
+        assert!(parse_plist_string_array(plist, "WholeDisks").is_empty());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_parse_disk_info_plist_whole_removable() {
         let plist = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -1598,7 +1526,7 @@ mod tests {
     <key>USBSerialNumber</key><string>AA01234567890</string>
 </dict>
 </plist>"#;
-        let info = macos::parse_disk_info_plist(plist, "disk2").unwrap();
+        let info = parse_disk_info_plist(plist, "disk2").unwrap();
         assert!(info.whole_disk);
         assert!(info.removable);
         assert!(!info.read_only);
@@ -1609,7 +1537,6 @@ mod tests {
         assert_eq!(info.usb_serial.as_deref(), Some("AA01234567890"));
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_parse_disk_info_plist_not_whole_disk() {
         let plist = r#"<plist version="1.0"><dict>
@@ -1617,55 +1544,47 @@ mod tests {
             <key>RemovableMediaOrExternalDevice</key><true/>
             <key>TotalSize</key><integer>16000000000</integer>
         </dict></plist>"#;
-        let info = macos::parse_disk_info_plist(plist, "disk2s1").unwrap();
+        let info = parse_disk_info_plist(plist, "disk2s1").unwrap();
         assert!(!info.whole_disk);
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_parse_disk_info_plist_zero_size_returns_none() {
         let plist = r#"<plist version="1.0"><dict>
             <key>WholeDisk</key><true/>
             <key>TotalSize</key><integer>0</integer>
         </dict></plist>"#;
-        assert!(macos::parse_disk_info_plist(plist, "disk2").is_none());
+        assert!(parse_disk_info_plist(plist, "disk2").is_none());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_extract_integer_from_integer_tag() {
-        assert_eq!(
-            macos::extract_integer("<integer>12345</integer>"),
-            Some(12345)
-        );
+        assert_eq!(extract_integer("<integer>12345</integer>"), Some(12345));
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_extract_integer_from_real_tag() {
         assert_eq!(
-            macos::extract_integer("<real>32017047552.0</real>"),
+            extract_integer("<real>32017047552.0</real>"),
             Some(32017047552)
         );
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn test_extract_string_tag() {
         assert_eq!(
-            macos::extract_string("<string>/Volumes/USB</string>"),
+            extract_string("<string>/Volumes/USB</string>"),
             Some("/Volumes/USB".to_string())
         );
     }
 
     // ── Windows wmic parser ───────────────────────────────────────────────────
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_wmic_csv_basic() {
         let csv = "\r\nNode,DeviceID,Model,PNPDeviceID,SerialNumber,Size\r\n\
             MYPC,\\\\.\\PhysicalDrive1,SanDisk Ultra,USB\\VID_0781&PID_5581\\AA0123,AA0123,32017047552\r\n";
-        let disks = windows::parse_wmic_csv(csv);
+        let disks = parse_wmic_csv(csv);
         assert_eq!(disks.len(), 1);
         assert!(disks[0].device_id.contains("PhysicalDrive1"));
         assert_eq!(disks[0].size_bytes, 32017047552);
@@ -1674,118 +1593,105 @@ mod tests {
         assert_eq!(disks[0].product_id, Some(0x5581));
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_wmic_csv_multiple_disks() {
         let csv = "Node,DeviceID,Model,PNPDeviceID,SerialNumber,Size\r\n\
             PC,\\\\.\\PhysicalDrive1,SanDisk Ultra,USB\\VID_0781&PID_5581\\SN1,SN1,32017047552\r\n\
             PC,\\\\.\\PhysicalDrive2,Kingston DT,USB\\VID_0951&PID_1666\\SN2,SN2,16000000000\r\n";
-        let disks = windows::parse_wmic_csv(csv);
+        let disks = parse_wmic_csv(csv);
         assert_eq!(disks.len(), 2);
         assert_eq!(disks[0].vendor_id, Some(0x0781));
         assert_eq!(disks[1].vendor_id, Some(0x0951));
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_wmic_csv_zero_size_included() {
         // Zero-size entries are included by parse_wmic_csv; enumerate() filters them.
         let csv = "Node,DeviceID,Model,PNPDeviceID,SerialNumber,Size\r\n\
             PC,\\\\.\\PhysicalDrive1,Unknown,USB\\VID_1234&PID_5678\\SN,,0\r\n";
-        let disks = windows::parse_wmic_csv(csv);
+        let disks = parse_wmic_csv(csv);
         assert_eq!(disks.len(), 1);
         assert_eq!(disks[0].size_bytes, 0);
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_wmic_csv_empty() {
-        assert!(windows::parse_wmic_csv("").is_empty());
+        assert!(parse_wmic_csv("").is_empty());
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_wmic_csv_header_only() {
         let csv = "Node,DeviceID,Model,PNPDeviceID,SerialNumber,Size\r\n";
-        assert!(windows::parse_wmic_csv(csv).is_empty());
+        assert!(parse_wmic_csv(csv).is_empty());
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_wmic_csv_skips_non_physical() {
         let csv = "Node,DeviceID,Model,PNPDeviceID,SerialNumber,Size\r\n\
             MYPC,\\\\.\\CDROM0,Some CD Drive,,,\r\n";
-        assert!(windows::parse_wmic_csv(csv).is_empty());
+        assert!(parse_wmic_csv(csv).is_empty());
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_wmic_csv_missing_pnp_column_still_parses() {
         // Older wmic versions may omit PNPDeviceID — VID/PID should be None.
         let csv = "Node,DeviceID,Model,SerialNumber,Size\r\n\
             PC,\\\\.\\PhysicalDrive1,SanDisk,SN1,32017047552\r\n";
-        let disks = windows::parse_wmic_csv(csv);
+        let disks = parse_wmic_csv(csv);
         assert_eq!(disks.len(), 1);
         assert_eq!(disks[0].vendor_id, None);
         assert_eq!(disks[0].product_id, None);
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_vid_pid_from_pnp_standard() {
-        let (vid, pid) = windows::parse_vid_pid_from_pnp("USB\\VID_0781&PID_5581\\AA01234567890");
+        let (vid, pid) = parse_vid_pid_from_pnp("USB\\VID_0781&PID_5581\\AA01234567890");
         assert_eq!(vid, Some(0x0781));
         assert_eq!(pid, Some(0x5581));
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_vid_pid_from_pnp_lowercase() {
         // Windows PNPDeviceID is case-insensitive — we uppercase internally.
-        let (vid, pid) = windows::parse_vid_pid_from_pnp("usb\\vid_0781&pid_5581\\SN");
+        let (vid, pid) = parse_vid_pid_from_pnp("usb\\vid_0781&pid_5581\\SN");
         assert_eq!(vid, Some(0x0781));
         assert_eq!(pid, Some(0x5581));
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_vid_pid_from_pnp_empty() {
-        let (vid, pid) = windows::parse_vid_pid_from_pnp("");
+        let (vid, pid) = parse_vid_pid_from_pnp("");
         assert_eq!(vid, None);
         assert_eq!(pid, None);
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_vid_pid_from_pnp_no_pid() {
         // Malformed: has VID but no PID.
-        let (vid, pid) = windows::parse_vid_pid_from_pnp("USB\\VID_0781\\SN");
+        let (vid, pid) = parse_vid_pid_from_pnp("USB\\VID_0781\\SN");
         assert_eq!(vid, Some(0x0781));
         assert_eq!(pid, None);
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_vid_pid_from_pnp_no_vid() {
         // No VID at all.
-        let (vid, pid) = windows::parse_vid_pid_from_pnp("USB\\PID_5581\\SN");
+        let (vid, pid) = parse_vid_pid_from_pnp("USB\\PID_5581\\SN");
         assert_eq!(vid, None);
         assert_eq!(pid, Some(0x5581));
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_vid_pid_from_pnp_non_usb_path() {
         // Non-USB PNP path — no VID/PID markers.
-        let (vid, pid) = windows::parse_vid_pid_from_pnp("SCSI\\DISK&VEN_WDC&PROD_WD10EZEX");
+        let (vid, pid) = parse_vid_pid_from_pnp("SCSI\\DISK&VEN_WDC&PROD_WD10EZEX");
         assert_eq!(vid, None);
         assert_eq!(pid, None);
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn test_parse_vid_pid_from_pnp_ffff_values() {
-        let (vid, pid) = windows::parse_vid_pid_from_pnp("USB\\VID_FFFF&PID_FFFF\\SN");
+        let (vid, pid) = parse_vid_pid_from_pnp("USB\\VID_FFFF&PID_FFFF\\SN");
         assert_eq!(vid, Some(0xFFFF));
         assert_eq!(pid, Some(0xFFFF));
     }
