@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.7.1 - 2026-03-03
+### 🐛 Bug Fixes
+- Fix macOS parsing helpers to compile under test on all platforms
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.7.0...v0.7.1
 ## 0.7.0 - 2026-03-03
 ### ♻️ Refactor
 - Refactor macOS parsing helpers for testability and clarity
@@ -9,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - Remove nusb dependency and switch to native USB detection
 ### 🔧 Chores
 - chore: nightly dependency update 2026-03-02
+- chore: bump version to 0.7.0
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.6.9...v0.7.0
 ## 0.6.9 - 2026-03-02
 ### 🔧 Chores
