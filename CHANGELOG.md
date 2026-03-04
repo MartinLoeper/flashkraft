@@ -2,9 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.7.2 - 2026-03-04
+### 📦 Other Changes
+- Call load_drives_sync directly instead of spawning blocking task
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.7.1...v0.7.2
 ## 0.7.1 - 2026-03-03
 ### 🐛 Bug Fixes
 - Fix macOS parsing helpers to compile under test on all platforms
+### 🔧 Chores
+- chore: bump version to 0.7.1
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.7.0...v0.7.1
 ## 0.7.0 - 2026-03-03
 ### ♻️ Refactor
