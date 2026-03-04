@@ -33,9 +33,7 @@ use crate::domain::drive_info::{DriveInfo, UsbInfo};
 /// - Size in GB.
 /// - `usb_info` populated with VID/PID/manufacturer/product/serial/speed.
 pub async fn load_drives() -> Vec<DriveInfo> {
-    tokio::task::spawn_blocking(load_drives_sync)
-        .await
-        .unwrap_or_default()
+    load_drives_sync()
 }
 
 /// Synchronous implementation — called from a blocking thread pool via
