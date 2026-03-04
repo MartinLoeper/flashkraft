@@ -2,9 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.7.3 - 2026-03-04
+### ➕ Added
+- Add USB hotplug detection via nusb and update error view
+### 📈 Improvements
+- Improve command line detection and clean up comments in status_views
+**Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.7.2...v0.7.3
 ## 0.7.2 - 2026-03-04
 ### 📦 Other Changes
 - Call load_drives_sync directly instead of spawning blocking task
+### 🔧 Chores
+- chore: bump version to 0.7.2
 **Full Changelog**: https://github.com/sorinirimies/flashkraft/compare/v0.7.1...v0.7.2
 ## 0.7.1 - 2026-03-03
 ### 🐛 Bug Fixes
