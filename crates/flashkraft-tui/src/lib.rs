@@ -101,7 +101,7 @@ pub async fn run() -> Result<()> {
 ///
 /// Each iteration:
 /// 1. Tick the internal counter (used for animations).
-/// 2. Drain any pending async channel messages (drive detection / flash events).
+/// 2. Drain any pending async channel messages (drive detection / flash / hotplug).
 /// 3. Render a single frame.
 /// 4. Block for up to 100 ms waiting for a keyboard event.
 ///
@@ -113,11 +113,48 @@ where
 {
     let mut app = App::new();
 
+    // ── USB hotplug watcher ───────────────────────────────────────────────────
+    //
+    // Spawn a background task that listens for USB connect / disconnect events
+    // via `nusb::watch_devices()` and forwards a bare `()` trigger over an
+    // unbounded channel.  `poll_hotplug()` drains the channel each tick and
+    // starts a fresh drive enumeration when triggered.
+    //
+    // The task lives for the entire lifetime of the application.  If the OS
+    // refuses to create the watch (no USB subsystem) we log and move on —
+    // the manual r/F5 refresh path still works normally.
+    {
+        use flashkraft_core::commands::watch_usb_events;
+        use futures::StreamExt as _;
+        use tokio::sync::mpsc;
+
+        let (tx, rx) = mpsc::unbounded_channel::<()>();
+        app.hotplug_rx = Some(rx);
+
+        tokio::spawn(async move {
+            match watch_usb_events() {
+                Ok(mut stream) => {
+                    while stream.next().await.is_some() {
+                        // A send failure means the App (and its receiver) was
+                        // dropped — the TUI is shutting down; exit the task.
+                        if tx.send(()).is_err() {
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[hotplug] watch_usb_events failed: {e}");
+                }
+            }
+        });
+    }
+
     loop {
         // ── Tick ─────────────────────────────────────────────────────────────
         app.tick_count = app.tick_count.wrapping_add(1);
 
         // ── Poll async channels ───────────────────────────────────────────────
+        app.poll_hotplug();
         app.poll_drives();
         app.poll_flash();
 

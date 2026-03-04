@@ -41,6 +41,13 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
             Task::perform(commands::load_drives(), Message::DrivesRefreshed)
         }
 
+        Message::UsbHotplugDetected => {
+            // A USB device was connected or disconnected — re-enumerate drives
+            // exactly as if the user had pressed Refresh.  The drive list will
+            // update automatically without any user interaction.
+            Task::perform(commands::load_drives(), Message::DrivesRefreshed)
+        }
+
         Message::TargetDriveClicked(drive) => {
             // Update selected target
             state.selected_target = Some(drive);

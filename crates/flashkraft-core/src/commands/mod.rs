@@ -6,6 +6,7 @@
 //! ## What belongs here
 //!
 //! - Drive / block-device detection ([`drive_detection`])
+//! - USB hotplug event stream ([`hotplug`])
 //!
 //! ## What does NOT belong here
 //!
@@ -13,7 +14,9 @@
 //!   `flashkraft-gui::core::commands::file_selection`.
 
 pub mod drive_detection;
+pub mod hotplug;
 
 // ── Convenience re-exports ────────────────────────────────────────────────────
 
-pub use drive_detection::load_drives;
+pub use drive_detection::{load_drives, load_drives_sync};
+pub use hotplug::{watch_usb_events, UsbHotplugEvent};

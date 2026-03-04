@@ -1,5 +1,13 @@
 //! Application State Module
 //!
+//! ## Hotplug
+//!
+//! [`FlashKraft::subscription`] includes a persistent USB hotplug watch
+//! powered by `nusb::watch_devices()`.  When any USB device is connected or
+//! disconnected the subscription emits [`Message::UsbHotplugDetected`], which
+//! `update.rs` handles by re-running drive detection — identical to the user
+//! pressing Refresh, but automatic.
+//!
 //! This module contains the main application state (FlashKraft struct)
 //! which represents the complete state of the application at any point in time.
 //!
@@ -12,7 +20,9 @@ use crate::core::storage::Storage;
 use crate::core::{update, Message};
 use crate::domain::{DriveInfo, ImageInfo};
 use crate::view;
-use iced::{Element, Subscription, Task, Theme};
+use flashkraft_core::commands::watch_usb_events;
+use futures::StreamExt as _;
+use iced::{stream, Element, Subscription, Task, Theme};
 use std::sync::{atomic::AtomicBool, Arc};
 
 /// The main application state
@@ -194,8 +204,9 @@ impl FlashKraft {
 
     /// Subscribe to long-running operations
     ///
-    /// This enables streaming progress updates from the flash operation
-    /// and animation ticks for the progress bar.
+    /// This enables streaming progress updates from the flash operation,
+    /// animation ticks for the progress bar, and automatic USB hotplug
+    /// detection (so the drive list updates without the user pressing Refresh).
     ///
     /// # Returns
     ///
@@ -203,7 +214,35 @@ impl FlashKraft {
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = Vec::new();
 
-        // Flash progress subscription
+        // ── USB hotplug — always active ───────────────────────────────────────
+        //
+        // watch_devices() listens via the kernel netlink USB socket on Linux,
+        // IOKit on macOS, and RegisterDeviceNotification on Windows.  It does
+        // NOT open any /dev/bus/usb node, so no udev rule or elevated privilege
+        // is required.  When the watch cannot be created (no USB subsystem) we
+        // simply produce no events rather than crashing.
+        let hotplug_sub = Subscription::run_with_id(
+            "usb-hotplug",
+            stream::channel(4, |mut output| async move {
+                use futures::SinkExt as _;
+                match watch_usb_events() {
+                    Ok(mut events) => {
+                        while let Some(_event) = events.next().await {
+                            let _ = output.send(Message::UsbHotplugDetected).await;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[hotplug] watch_usb_events failed: {e}");
+                        // Park the future so the subscription stays alive but
+                        // silent — avoids Iced restarting it in a tight loop.
+                        std::future::pending::<()>().await;
+                    }
+                }
+            }),
+        );
+        subscriptions.push(hotplug_sub);
+
+        // ── Flash progress ────────────────────────────────────────────────────
         if self.flashing_active {
             if let (Some(image), Some(target)) = (&self.selected_image, &self.selected_target) {
                 let flash_sub = crate::core::flash_subscription::flash_progress(

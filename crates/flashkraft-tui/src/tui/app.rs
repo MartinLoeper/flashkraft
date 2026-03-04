@@ -154,6 +154,11 @@ pub struct App {
     pub drives_loading: bool,
     /// Channel receiving the result of the async drive-detection task.
     pub drives_rx: Option<mpsc::UnboundedReceiver<Vec<DriveInfo>>>,
+    /// Channel receiving bare hotplug triggers from the nusb watch task.
+    /// Each received value means "a USB device connected or disconnected —
+    /// re-enumerate drives".  The payload is `()` because all drive data
+    /// comes from the existing sysfs / diskutil / wmic enumeration code.
+    pub hotplug_rx: Option<mpsc::UnboundedReceiver<()>>,
 
     // ── Flash operation ───────────────────────────────────────────────────────
     /// Progress 0.0–1.0.
@@ -233,6 +238,7 @@ impl App {
             selected_drive: None,
             drives_loading: false,
             drives_rx: None,
+            hotplug_rx: None,
             flash_progress: 0.0,
             flash_bytes: 0,
             flash_speed: 0.0,
@@ -276,6 +282,54 @@ impl App {
     // -----------------------------------------------------------------------
     // Channel polling — called on every tick from the main event loop
     // -----------------------------------------------------------------------
+
+    /// Drain the USB hotplug channel and trigger drive re-detection on any event.
+    ///
+    /// Called on every tick from the main event loop.  A received `()` means
+    /// a USB device was connected or disconnected; we respond by kicking off
+    /// a fresh drive enumeration — identical to the user pressing `r`/`F5`.
+    ///
+    /// The hotplug task is started once in `run_app` and runs for the lifetime
+    /// of the application.  We keep the receiver here so poll is cheap
+    /// (non-blocking `try_recv`) and the watcher is never re-created.
+    pub fn poll_hotplug(&mut self) {
+        let mut rx = match self.hotplug_rx.take() {
+            Some(r) => r,
+            None => return,
+        };
+
+        // Drain all pending events (there may be bursts when a hub is
+        // plugged in with multiple devices attached).  A single drive
+        // re-detection is enough regardless of burst size.
+        let mut triggered = false;
+        while rx.try_recv().is_ok() {
+            triggered = true;
+        }
+
+        // Put the receiver back before potentially starting detection,
+        // so that future ticks can continue to receive events.
+        self.hotplug_rx = Some(rx);
+
+        if triggered && !self.drives_loading {
+            // Only re-detect when we are not already mid-detection and not
+            // actively flashing (disturbing the drive list during a flash
+            // would be confusing and is unnecessary).
+            let flashing = matches!(self.screen, AppScreen::Flashing);
+            if !flashing {
+                // Reuse the same channel-based detection path used by r/F5.
+                use tokio::sync::mpsc;
+                self.drives_loading = true;
+                self.available_drives.clear();
+                self.drive_cursor = 0;
+                let (tx, new_rx) = mpsc::unbounded_channel::<Vec<crate::domain::DriveInfo>>();
+                self.drives_rx = Some(new_rx);
+                tokio::spawn(async move {
+                    let drives = crate::core::commands::load_drives().await;
+                    let _ = tx.send(drives);
+                });
+            }
+        }
+    }
 
     /// Drain the drive-detection channel (if active) and apply results.
     pub fn poll_drives(&mut self) {

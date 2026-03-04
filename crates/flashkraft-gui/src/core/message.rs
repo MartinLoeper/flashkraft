@@ -24,6 +24,13 @@ pub enum Message {
     /// User clicked the "Refresh Drives" button
     RefreshDrivesClicked,
 
+    /// A USB device was connected or disconnected — triggers re-enumeration.
+    ///
+    /// Emitted by the hotplug subscription in [`crate::core::state`] and
+    /// handled by immediately re-running drive detection, exactly as if the
+    /// user had pressed Refresh.
+    UsbHotplugDetected,
+
     /// User clicked on a specific target drive
     TargetDriveClicked(DriveInfo),
 
