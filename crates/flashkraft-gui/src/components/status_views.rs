@@ -102,7 +102,7 @@ fn split_error(error: &str) -> (&str, Vec<&str>) {
 }
 
 /// Return true when a detail line looks like a shell command (starts with `sudo`
-/// or contains a path separator), so we can render it in the code card.
+/// or a path separator, or the word `Install`), so we can render it in the code card.
 fn is_command_line(line: &str) -> bool {
     line.starts_with("sudo ") || line.starts_with('/') || line.starts_with("Install")
 }
@@ -117,7 +117,7 @@ pub fn view_error<'a>(state: &'a crate::core::FlashKraft, error: &'a str) -> Ele
         Space::with_height(4),
         text("Error").size(28),
         Space::with_height(12),
-        container(text(headline).size(15),).max_width(520),
+        container(text(headline).size(15)).max_width(520),
     ]
     .spacing(0)
     .align_x(Alignment::Center);
@@ -150,7 +150,6 @@ pub fn view_error<'a>(state: &'a crate::core::FlashKraft, error: &'a str) -> Ele
         let card = container(card_col)
             .style(|theme: &Theme| {
                 let base = theme.palette().background;
-                // Darken the background slightly for the code card.
                 let darkened = Color {
                     r: (base.r * 0.6).clamp(0.0, 1.0),
                     g: (base.g * 0.6).clamp(0.0, 1.0),
@@ -202,6 +201,37 @@ pub fn view_error<'a>(state: &'a crate::core::FlashKraft, error: &'a str) -> Ele
     let content = column![
         theme_selector::theme_selector_right(&state.theme),
         error_content,
+    ];
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+/// Flash complete view
+pub fn view_complete(state: &crate::core::FlashKraft) -> Element<'_, Message> {
+    let complete_content = column![
+        icons::icon(Bootstrap::CheckCircleFill, 80.0),
+        text("Flash Complete!").size(32),
+        Space::with_height(20),
+        text("Your device is ready to use").size(16),
+        Space::with_height(20),
+        button(text("Flash Another").size(14))
+            .on_press(Message::ResetClicked)
+            .padding(10),
+    ]
+    .spacing(10)
+    .align_x(Alignment::Center)
+    .padding(40);
+
+    let content = column![
+        theme_selector::theme_selector_right(&state.theme),
+        container(complete_content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
     ];
 
     container(content)
@@ -264,7 +294,6 @@ mod tests {
         let (headline, detail) = split_error(msg);
 
         assert_eq!(headline, "Permission denied opening '/dev/sdb'.");
-        // Blank lines are dropped; 4 non-empty detail lines remain.
         assert_eq!(detail.len(), 4);
         assert_eq!(detail[0], "The binary is not installed setuid-root.");
         assert_eq!(detail[1], "Install with:");
@@ -322,40 +351,9 @@ mod tests {
             .collect();
 
         assert_eq!(prose, vec!["The binary is not installed setuid-root."]);
-        assert_eq!(commands.len(), 3); // "Install with:", chown line, chmod line
+        assert_eq!(commands.len(), 3);
         assert!(commands[0].starts_with("Install"));
         assert!(commands[1].contains("chown"));
         assert!(commands[2].contains("chmod"));
     }
-}
-
-/// Flash complete view
-pub fn view_complete(state: &crate::core::FlashKraft) -> Element<'_, Message> {
-    let complete_content = column![
-        icons::icon(Bootstrap::CheckCircleFill, 80.0),
-        text("Flash Complete!").size(32),
-        Space::with_height(20),
-        text("Your device is ready to use").size(16),
-        Space::with_height(20),
-        button(text("Flash Another").size(14))
-            .on_press(Message::ResetClicked)
-            .padding(10),
-    ]
-    .spacing(10)
-    .align_x(Alignment::Center)
-    .padding(40);
-
-    let content = column![
-        theme_selector::theme_selector_right(&state.theme),
-        container(complete_content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill),
-    ];
-
-    container(content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
 }
