@@ -4,10 +4,11 @@
 //! information about a storage drive in the system.
 
 // ---------------------------------------------------------------------------
-// USB metadata (populated by nusb enumeration)
+// USB metadata (populated by sysfs / diskutil / wmic enumeration)
 // ---------------------------------------------------------------------------
 
-/// Rich metadata sourced directly from USB descriptors via `nusb`.
+/// Rich metadata sourced from USB descriptors via the native OS enumeration
+/// (sysfs on Linux, `system_profiler` on macOS, wmic PNPDeviceID on Windows).
 ///
 /// Only present when the drive was detected as a USB Mass Storage device.
 /// Internal SATA / NVMe / eMMC drives will have `usb_info: None`.

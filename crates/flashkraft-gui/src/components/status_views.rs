@@ -104,7 +104,14 @@ fn split_error(error: &str) -> (&str, Vec<&str>) {
 /// Return true when a detail line looks like a shell command (starts with `sudo`
 /// or a path separator, or the word `Install`), so we can render it in the code card.
 fn is_command_line(line: &str) -> bool {
-    line.starts_with("sudo ") || line.starts_with('/') || line.starts_with("Install")
+    line.starts_with("sudo ") || line.starts_with('/')
+}
+
+/// Collapse runs of internal whitespace to a single space so that padding
+/// used for source-code alignment (e.g. `u+s      /usr/bin/…`) is not
+/// preserved verbatim in the rendered output.
+fn normalise_spaces(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Error view
@@ -144,7 +151,11 @@ pub fn view_error<'a>(state: &'a crate::core::FlashKraft, error: &'a str) -> Ele
         let mut card_col: iced::widget::Column<'a, Message> =
             column![].spacing(4).padding(14).align_x(Alignment::Start);
         for cmd in &commands {
-            card_col = card_col.push(text(*cmd).size(13).font(iced::Font::MONOSPACE));
+            card_col = card_col.push(
+                text(normalise_spaces(cmd))
+                    .size(13)
+                    .font(iced::Font::MONOSPACE),
+            );
         }
 
         let card = container(card_col)
@@ -163,7 +174,7 @@ pub fn view_error<'a>(state: &'a crate::core::FlashKraft, error: &'a str) -> Ele
                             r: 1.0,
                             g: 1.0,
                             b: 1.0,
-                            a: 0.08,
+                            a: 0.15,
                         },
                         width: 1.0,
                         radius: 6.0.into(),
@@ -174,7 +185,7 @@ pub fn view_error<'a>(state: &'a crate::core::FlashKraft, error: &'a str) -> Ele
             .width(Length::Fixed(480.0));
 
         body = body.push(Space::with_height(16));
-        body = body.push(card);
+        body = body.push(container(card).width(Length::Fill).center_x(Length::Fill));
     }
 
     // ── Action buttons ────────────────────────────────────────────────────────
@@ -286,17 +297,23 @@ mod tests {
     #[test]
     fn test_split_error_permission_denied_shape() {
         let msg = "Permission denied opening '/dev/sdb'.\n\
-                   The binary is not installed setuid-root.\n\
-                   Install with:\n  \
-                   sudo chown root:root /usr/bin/flashkraft\n  \
-                   sudo chmod u+s      /usr/bin/flashkraft";
+                   FlashKraft needs root access to write to block devices.\n\
+                   Install setuid-root so it can escalate automatically:\n\
+                   sudo chown root:root /usr/bin/flashkraft\n\
+                   sudo chmod u+s /usr/bin/flashkraft";
 
         let (headline, detail) = split_error(msg);
 
         assert_eq!(headline, "Permission denied opening '/dev/sdb'.");
         assert_eq!(detail.len(), 4);
-        assert_eq!(detail[0], "The binary is not installed setuid-root.");
-        assert_eq!(detail[1], "Install with:");
+        assert_eq!(
+            detail[0],
+            "FlashKraft needs root access to write to block devices."
+        );
+        assert_eq!(
+            detail[1],
+            "Install setuid-root so it can escalate automatically:"
+        );
         assert!(detail[2].contains("chown"));
         assert!(detail[3].contains("chmod"));
     }
@@ -316,15 +333,28 @@ mod tests {
     }
 
     #[test]
-    fn test_is_command_line_install_prefix() {
-        assert!(is_command_line("Install with:"));
-    }
-
-    #[test]
     fn test_is_command_line_prose_is_not_command() {
+        assert!(!is_command_line("Install with:"));
         assert!(!is_command_line("The binary is not installed setuid-root."));
         assert!(!is_command_line("Permission denied opening the device."));
         assert!(!is_command_line(""));
+    }
+
+    #[test]
+    fn test_normalise_spaces_collapses_internal_padding() {
+        assert_eq!(
+            normalise_spaces("sudo chmod u+s      /usr/bin/flashkraft"),
+            "sudo chmod u+s /usr/bin/flashkraft"
+        );
+        assert_eq!(
+            normalise_spaces("sudo chown root:root /usr/bin/flashkraft"),
+            "sudo chown root:root /usr/bin/flashkraft"
+        );
+        assert_eq!(
+            normalise_spaces("  leading and trailing  "),
+            "leading and trailing"
+        );
+        assert_eq!(normalise_spaces("no  extra  spaces"), "no extra spaces");
     }
 
     // ── prose vs command partitioning ────────────────────────────────────────
@@ -332,10 +362,10 @@ mod tests {
     #[test]
     fn test_permission_denied_partitions_correctly() {
         let msg = "Permission denied opening '/dev/sdb'.\n\
-                   The binary is not installed setuid-root.\n\
-                   Install with:\n\
+                   FlashKraft needs root access to write to block devices.\n\
+                   Install setuid-root so it can escalate automatically:\n\
                    sudo chown root:root /usr/bin/flashkraft\n\
-                   sudo chmod u+s      /usr/bin/flashkraft";
+                   sudo chmod u+s /usr/bin/flashkraft";
 
         let (_, detail) = split_error(msg);
 
@@ -350,10 +380,16 @@ mod tests {
             .filter(|l| is_command_line(l))
             .collect();
 
-        assert_eq!(prose, vec!["The binary is not installed setuid-root."]);
-        assert_eq!(commands.len(), 3);
-        assert!(commands[0].starts_with("Install"));
-        assert!(commands[1].contains("chown"));
-        assert!(commands[2].contains("chmod"));
+        // Prose lines: explanatory text and label lines (not sudo/path commands)
+        assert_eq!(
+            prose,
+            vec![
+                "FlashKraft needs root access to write to block devices.",
+                "Install setuid-root so it can escalate automatically:",
+            ]
+        );
+        assert_eq!(commands.len(), 2);
+        assert!(commands[0].contains("chown"));
+        assert!(commands[1].contains("chmod"));
     }
 }

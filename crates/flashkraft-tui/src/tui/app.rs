@@ -154,8 +154,8 @@ pub struct App {
     pub drives_loading: bool,
     /// Channel receiving the result of the async drive-detection task.
     pub drives_rx: Option<mpsc::UnboundedReceiver<Vec<DriveInfo>>>,
-    /// Channel receiving bare hotplug triggers from the nusb watch task.
-    /// Each received value means "a USB device connected or disconnected —
+    /// Channel receiving bare hotplug triggers from the filesystem watch task.
+    /// Each received value means "a block device connected or disconnected —
     /// re-enumerate drives".  The payload is `()` because all drive data
     /// comes from the existing sysfs / diskutil / wmic enumeration code.
     pub hotplug_rx: Option<mpsc::UnboundedReceiver<()>>,

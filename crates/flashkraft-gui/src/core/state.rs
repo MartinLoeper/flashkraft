@@ -3,10 +3,11 @@
 //! ## Hotplug
 //!
 //! [`FlashKraft::subscription`] includes a persistent USB hotplug watch
-//! powered by `nusb::watch_devices()`.  When any USB device is connected or
-//! disconnected the subscription emits [`Message::UsbHotplugDetected`], which
-//! `update.rs` handles by re-running drive detection — identical to the user
-//! pressing Refresh, but automatic.
+//! powered by `watch_usb_events()` (inotify on Linux, FSEvents on macOS,
+//! ReadDirectoryChangesW on Windows — no elevated privileges required).
+//! When any block device is connected or disconnected the subscription emits
+//! [`Message::UsbHotplugDetected`], which `update.rs` handles by re-running
+//! drive detection — identical to the user pressing Refresh, but automatic.
 //!
 //! This module contains the main application state (FlashKraft struct)
 //! which represents the complete state of the application at any point in time.
@@ -216,11 +217,11 @@ impl FlashKraft {
 
         // ── USB hotplug — always active ───────────────────────────────────────
         //
-        // watch_devices() listens via the kernel netlink USB socket on Linux,
-        // IOKit on macOS, and RegisterDeviceNotification on Windows.  It does
-        // NOT open any /dev/bus/usb node, so no udev rule or elevated privilege
-        // is required.  When the watch cannot be created (no USB subsystem) we
-        // simply produce no events rather than crashing.
+        // watch_usb_events() watches /sys/block via inotify on Linux, /dev via
+        // FSEvents on macOS, and a directory via ReadDirectoryChangesW on
+        // Windows.  No elevated privileges are required for any of these
+        // watches.  When the watch cannot be created (path missing or sandboxed)
+        // we simply produce no events rather than crashing.
         let hotplug_sub = Subscription::run_with_id(
             "usb-hotplug",
             stream::channel(4, |mut output| async move {

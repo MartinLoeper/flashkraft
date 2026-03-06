@@ -73,6 +73,14 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
         Message::FlashClicked => {
             // Validate we can flash
             if state.is_ready_to_flash() {
+                // If we are not already running as root, attempt a transparent
+                // re-exec via pkexec / sudo so the user gets a polkit password
+                // prompt now — before the flash subscription starts — rather
+                // than hitting a hard permission error mid-flash.
+                if !flashkraft_core::flash_helper::is_privileged() {
+                    return Task::perform(async { Message::EscalateAndFlash }, |m| m);
+                }
+
                 // Create a new cancellation token for this flash operation
                 state.flash_cancel_token =
                     std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -89,6 +97,36 @@ pub fn update(state: &mut FlashKraft, message: Message) -> Task<Message> {
                     Some("Please select both an image file and a target drive".to_string());
                 Task::none()
             }
+        }
+
+        Message::EscalateAndFlash => {
+            // Called when FlashClicked detects we are not running as root.
+            //
+            // `reexec_as_root()` calls execvp, which replaces this process
+            // image entirely on success — the Iced runtime, all threads, and
+            // all open file descriptors are replaced by the new privileged
+            // process, which restarts from main() and finds geteuid() == 0.
+            //
+            // If this function returns it means:
+            //   • neither pkexec nor sudo was found on PATH, or
+            //   • the user dismissed the polkit dialog / Ctrl-C'd sudo.
+            //
+            // In that case we fall through and start the subscription anyway;
+            // the flash pipeline will hit EACCES when it tries to open the
+            // block device and show the clear error message with install
+            // instructions.
+            flashkraft_core::flash_helper::reexec_as_root();
+
+            // reexec returned → escalation unavailable or declined.
+            // Proceed with the flash attempt so the user sees the specific
+            // error (and the setuid install instructions) rather than nothing.
+            state.flash_cancel_token =
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            state.flash_progress = Some(0.0);
+            state.error_message = None;
+            state.flashing_active = true;
+
+            Task::none()
         }
 
         Message::ResetClicked => {
@@ -265,6 +303,31 @@ mod tests {
 
         assert!(state.error_message.is_some());
         assert!(state.flash_progress.is_none());
+    }
+
+    #[test]
+    fn test_escalate_and_flash_starts_flashing() {
+        // When EscalateAndFlash fires (reexec_as_root already returned without
+        // exec-ing — i.e. escalation was unavailable), the subscription must
+        // still be activated so the user sees the permission error.
+        let mut state = FlashKraft::new();
+        state.selected_image = Some(crate::domain::ImageInfo {
+            path: std::path::PathBuf::from("/tmp/test.img"),
+            name: "test.img".to_string(),
+            size_mb: 100.0,
+        });
+        state.selected_target = Some(DriveInfo::new(
+            "USB".to_string(),
+            "/media/usb".to_string(),
+            32.0,
+            "/dev/sdb".to_string(),
+        ));
+
+        let _ = update(&mut state, Message::EscalateAndFlash);
+
+        assert!(state.flashing_active);
+        assert_eq!(state.flash_progress, Some(0.0));
+        assert!(state.error_message.is_none());
     }
 
     #[test]

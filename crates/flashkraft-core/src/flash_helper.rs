@@ -68,6 +68,120 @@ pub fn set_real_uid(uid: u32) {
     let _ = REAL_UID.set(uid);
 }
 
+/// Return `true` when the process is currently running with effective root
+/// privileges (i.e. `geteuid() == 0`).
+///
+/// On non-Unix platforms this always returns `false` — callers should use
+/// the Windows Administrator check instead.
+pub fn is_privileged() -> bool {
+    #[cfg(unix)]
+    {
+        nix::unistd::geteuid().is_root()
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+/// Attempt to re-exec the current binary with root privileges via `pkexec`
+/// or `sudo -E`, whichever is found first on `PATH`.
+///
+/// This is called **on demand** — e.g. when the user clicks Flash and we
+/// detect that `is_privileged()` is `false` — rather than unconditionally
+/// at startup.  Because `execvp` replaces the current process image on
+/// success, this function only returns when neither escalation helper is
+/// available or the user declined (cancelled the polkit dialog / Ctrl-C'd
+/// the sudo prompt).
+///
+/// `FLASHKRAFT_ESCALATED=1` is injected into the child environment so that
+/// the re-exec'd process skips this call and does not loop.
+///
+/// # Safety
+///
+/// Safe to call from any thread, but must be called before the Iced event
+/// loop has started spawning threads that hold OS resources (file
+/// descriptors, mutexes) that `execvp` would implicitly close/reset.
+/// Calling it from the `update` handler (on the Iced main thread, before
+/// the flash subscription starts) satisfies this requirement.
+#[cfg(unix)]
+pub fn reexec_as_root() {
+    use std::ffi::CString;
+
+    // Guard: the re-exec'd copy sets this so we don't loop forever.
+    if std::env::var("FLASHKRAFT_ESCALATED").as_deref() == Ok("1") {
+        return;
+    }
+
+    let self_exe = match std::fs::read_link("/proc/self/exe").or_else(|_| std::env::current_exe()) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let self_exe_str = match self_exe.to_str() {
+        Some(s) => s.to_owned(),
+        None => return,
+    };
+
+    let extra_args: Vec<String> = std::env::args().skip(1).collect();
+
+    // Tell the child it was already escalated so it won't recurse.
+    std::env::set_var("FLASHKRAFT_ESCALATED", "1");
+
+    // ── Try pkexec first (graphical polkit dialog) ────────────────────────────
+    if unix_which_exists("pkexec") {
+        let mut argv: Vec<CString> = Vec::new();
+        argv.push(unix_c_str("pkexec"));
+        argv.push(unix_c_str(&self_exe_str));
+        for a in &extra_args {
+            argv.push(unix_c_str(a));
+        }
+        let _ = nix::unistd::execvp(&unix_c_str("pkexec"), &argv);
+    }
+
+    // ── Try sudo -E (terminal fallback) ───────────────────────────────────────
+    if unix_which_exists("sudo") {
+        let mut argv: Vec<CString> = Vec::new();
+        argv.push(unix_c_str("sudo"));
+        argv.push(unix_c_str("-E")); // preserve DISPLAY / WAYLAND_DISPLAY
+        argv.push(unix_c_str(&self_exe_str));
+        for a in &extra_args {
+            argv.push(unix_c_str(a));
+        }
+        let _ = nix::unistd::execvp(&unix_c_str("sudo"), &argv);
+    }
+
+    // Neither helper available — remove the guard and fall through unprivileged.
+    std::env::remove_var("FLASHKRAFT_ESCALATED");
+}
+
+/// Stub for non-Unix targets so call sites compile without `#[cfg]` guards.
+#[cfg(not(unix))]
+pub fn reexec_as_root() {}
+
+/// Return `true` if `name` is an executable file reachable via `PATH`.
+#[cfg(unix)]
+fn unix_which_exists(name: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in path_var.split(':') {
+            let candidate = std::path::Path::new(dir).join(name);
+            if let Ok(meta) = std::fs::metadata(&candidate) {
+                if meta.is_file() && meta.permissions().mode() & 0o111 != 0 {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Build a `CString`, replacing embedded NUL bytes with `?`.
+#[cfg(unix)]
+fn unix_c_str(s: &str) -> std::ffi::CString {
+    let sanitised: Vec<u8> = s.bytes().map(|b| if b == 0 { b'?' } else { b }).collect();
+    std::ffi::CString::new(sanitised).unwrap_or_else(|_| std::ffi::CString::new("?").unwrap())
+}
+
 /// Retrieve the stored real UID, falling back to the current effective UID.
 #[cfg(unix)]
 fn real_uid() -> nix::unistd::Uid {
@@ -300,10 +414,10 @@ fn open_device_for_writing(device_path: &str) -> Result<std::fs::File, String> {
                     } else {
                         format!(
                             "Permission denied opening '{device_path}'.\n\
-                             The binary is not installed setuid-root.\n\
-                             Install with:\n  \
-                             sudo chown root:root /usr/bin/flashkraft\n  \
-                             sudo chmod u+s      /usr/bin/flashkraft"
+                             FlashKraft needs root access to write to block devices.\n\
+                             Install setuid-root so it can escalate automatically:\n\
+                             sudo chown root:root /usr/bin/flashkraft\n\
+                             sudo chmod u+s /usr/bin/flashkraft"
                         )
                     }
                 } else if raw == libc::EBUSY {
@@ -1144,6 +1258,23 @@ mod tests {
     }
 
     // ── set_real_uid ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_privileged_returns_bool() {
+        // Just verify it doesn't panic and returns a consistent value.
+        let first = is_privileged();
+        let second = is_privileged();
+        assert_eq!(first, second, "is_privileged must be deterministic");
+    }
+
+    #[test]
+    fn test_reexec_as_root_does_not_panic_when_already_escalated() {
+        // With the guard env-var set, reexec_as_root must return immediately
+        // without panicking or actually exec-ing anything.
+        std::env::set_var("FLASHKRAFT_ESCALATED", "1");
+        reexec_as_root(); // must not exec — guard fires immediately
+        std::env::remove_var("FLASHKRAFT_ESCALATED");
+    }
 
     #[test]
     fn test_set_real_uid_stores_value() {

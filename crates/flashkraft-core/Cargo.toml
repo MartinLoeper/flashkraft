@@ -14,7 +14,7 @@ keywords = ["imager", "disk", "usb", "iso", "flash"]
 # ── System / hardware ─────────────────────────────────────────────────────────
 sysinfo       = { workspace = true }
 nix           = { workspace = true }
-nusb          = { workspace = true }
+notify        = { workspace = true }
 
 # ── Async utilities ───────────────────────────────────────────────────────────
 futures       = { workspace = true }

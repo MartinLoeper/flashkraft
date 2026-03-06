@@ -115,9 +115,10 @@ where
 
     // ── USB hotplug watcher ───────────────────────────────────────────────────
     //
-    // Spawn a background task that listens for USB connect / disconnect events
-    // via `nusb::watch_devices()` and forwards a bare `()` trigger over an
-    // unbounded channel.  `poll_hotplug()` drains the channel each tick and
+    // Spawn a background task that listens for block-device connect / disconnect
+    // events via `watch_usb_events()` (inotify on Linux, FSEvents on macOS,
+    // ReadDirectoryChangesW on Windows) and forwards a bare `()` trigger over
+    // an unbounded channel.  `poll_hotplug()` drains the channel each tick and
     // starts a fresh drive enumeration when triggered.
     //
     // The task lives for the entire lifetime of the application.  If the OS
